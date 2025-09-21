@@ -17,11 +17,17 @@ export default function App() {
   // 캘린더/시간표 스왑 보기 모드 (원래 두줄이였는데 한줄로 하는법이 있더라고요)
   const [viewMode, setViewMode] = useState<"calendarTop" | "scheduleTop">("calendarTop");
 
-  // 일단 날짜는 임의로 입력, 날짜는 년월일로 관리, 시간은 오름차순으로 관리, 색깔은 임의로 설정
-  const tasksByDate: Record<
+
+
+  // 여기부터 일정부분 //
+
+
+  const tasksByDate: Record< //날짜 문자열을 일정 배열로 매핑하는 객체, 각 날의 일정 하나는 임시로 이름/시작/종료/색으로 설정
     string,
     { title: string; start: string; end: string; color: string }[]
   > = {
+    
+  // 데이터는 일단 임의로 입력, 날짜는 년월일로 관리, 시간은 오름차순으로 관리, 색깔은 시간표 구분용으로 설정
 
     "2025-09-21": [
       { title: "업무", start: "08:00", end: "19:00", color: "#FFFF00" }, 
@@ -43,61 +49,73 @@ export default function App() {
     ],
   }; 
 
-  // 시간을 분 단위로 나타냄, 예를들어 08:00은 480, 19:30은 1170
+  // 12:00, 04:00같은 문자열 시간을 240, 720과 같은 정수 분으로 변환(파이차트 조각 크기 계산을 위해선 분 단위 시간길이가 필요)
   const toMinutes = (hhmm: string) => {
     const [h, m] = hhmm.split(":").map(Number);
     return h * 60 + m;
   };
 
-  // 선택 날짜에 따라 파이차트(원형시간표)배열 생성
-  const pieSlices = useMemo(() => {
-    const DAY_MIN = 1440;
-    const dayTasks = tasksByDate[selectedDate] || [];
+  // 선택 날짜에 따라 파이차트(원형시간표)배열 생성, 하루는 1440분으로 설정, 현재 선택된 날짜의 배열을 가져옴
+    const pieSlices = useMemo(() => { //useDemo는 특정 값 변경시에만 계산을 다시 수행하는 기능, 이 경우 선택 날이 바뀔 때만 파이차트를 변경
+    const DAY_MIN = 1440; //하루 전체 분 수는 1440
 
-    // 일단 일정없는부분은 단색으로 채우기
+    //taskByDate는 날짜별로 일정을 모아둔 객체, selected는 현재 선택한 날짜, tasksByDate[selectedDate]는 선택된 날짜에 따른 일정을 가져옴
+    //뒤의 || []; 는 selected에 해당 작업이 없어 반환되는게 없을 경우 오류 피하기 위해 빈 배열을 할당하는 역할
+    const dayTasks = tasksByDate[selectedDate] || []; 
+
+    // dayTasks에 일정이 없다면, 조각 크기를 하루 전체로 설정하고 색상을 옅은 회색으로 채움
     if (!dayTasks.length) {
       return [{ value: DAY_MIN, color: "#eeeeee" }];
     }
 
-    // 시작 시간 순 정렬(데이터가 이미 정렬되어 있어도 안전하게)
+    // 선택뇐 날짜의 작업들을 시작 시간 순서대로 정렬함
     const sorted = [...dayTasks].sort(
       (a, b) => toMinutes(a.start) - toMinutes(b.start)
     );
 
-    const slices: { value: number; color: string }[] = [];
-    let cursor = 0;
 
-    for (const t of sorted) {
+    // slices는 파이차트 컴포넌트에 넘겨줄 배열, 크기와 색깔이 쌓여 차트를 그림
+    const slices: { value: number; color: string }[] = [];
+    let cursor = 0; //cursor는 지금까지 채운 시각을 분 단위로 기록,처음은 자정 00:00에서 시작. 일정이 추가될 때마다 cursor를 해당 종료시각으로 옮김
+
+
+    
+    for (const t of sorted) { //시작시간 순서대로 일정 배열
       const start = Math.max(0, Math.min(DAY_MIN, toMinutes(t.start)));
-      const end = Math.max(0, Math.min(DAY_MIN, toMinutes(t.end)));
+      const end = Math.max(0, Math.min(DAY_MIN, toMinutes(t.end))); // 각각 HH:MM을 분 단위로 변환, 0분 이상, 1440분 이하로 잘라내기
       if (end <= start) {
-        // 0분/역전 구간은 스킵
+        // 만약 종료시각이 시작시각과 같거나 이르면 잘못된 일정으로 판단하고 건너뒴
         continue;
       }
 
-      // 이전 종료부터 현재 시작까지의 빈 구간
+      // 이전 종료부터 현재 시작까지의 일정 없는 구간은 무채색으로 칠함
       if (start > cursor) {
         slices.push({ value: start - cursor, color: "#eeeeee" });
       }
-      // 실제 일정 구간
+      // 실제 일정 구간은 해당 일정에 맞게 설정(현재는 임의로 설정한 값에 따름)
       slices.push({ value: end - start, color: t.color });
       cursor = end;
     }
 
-    // 마지막 이후의 빈 구간
+    // 모든 일정이 끝난 후, 남은 구간 역시 무채색으로 칠함
     if (cursor < DAY_MIN) {
       slices.push({ value: DAY_MIN - cursor, color: "#eeeeee" });
     }
 
-    // 합이 0이면 안됨
+    // 이렇게 만들어진 배열의 합이 전체 1440을 정확히 채움
     return slices;
   }, [selectedDate]); 
 
-  const todosForSelected = useMemo(() => {
-    const list = tasksByDate[selectedDate] || [];
+    //해야 할 일을 텍ㄷ스트 문자열로 바꿔서 보여줌
+    const todosForSelected = useMemo(() => {
+    const list = tasksByDate[selectedDate] || []; //선택된 날짜의 일정 배열을 가져옴, 없으면 오류 방지 위해 빈배열
 
-    return list.map((t) => `${t.start} ~ ${t.end} ${t.title}`);
-  }, [selectedDate]); // [add]
+    return list.map((t) => `${t.start} ~ ${t.end} ${t.title}`); //각 일정을 시작시간, 종료시간, 일정제목으로 보여줌
+  }, [selectedDate]); //날짜가 바뀔 때 다시 실행
+
+  //여기까지 일정관련 끝 //
+
+
 
   //파이차트 공통(아래/위 위치만 바뀜)
   const PieBlock = (
