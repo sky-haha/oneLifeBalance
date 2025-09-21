@@ -76,7 +76,7 @@ export default function App() {
         ) : (
           // 스왑된 상태일 때, 아래 부분은 할일 목록이 됨
           <ScrollView contentContainerStyle={styles.todoContainer}>
-            <Text style={styles.todoItem}>00:00 ~ 08:00 수면</Text>
+            <Text style={styles.todoItem}>추후 여기에 할일 적힘</Text>
             <Text style={styles.todoItem}>08:00 ~ 19:00 업무</Text>
           </ScrollView>
         )}
