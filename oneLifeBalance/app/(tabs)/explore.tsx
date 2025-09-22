@@ -1,27 +1,43 @@
-import React from "react";
-import { View, Text, Button } from "react-native";
-import { db } from "./firebaseConfig";
-import { collection, addDoc } from "firebase/firestore";
+import React, { useState } from "react";
+import { View, Text, TextInput, Button } from "react-native";
+import { auth } from "./firebaseConfig";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 
-export default function App() {
-  // Firestore에 데이터 저장 함수
-  const addData = async () => {
-    try {
-      await addDoc(collection(db, "notes"), {
-        title: "첫 메모",
-        content: "이것은 Firebase Firestore 테스트 데이터입니다.",
-        createdAt: new Date()
-      });
-      console.log("데이터 저장 성공!");
-    } catch (e) {
-      console.error("데이터 저장 실패: ", e);
-    }
+export default function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const handleLogin = () => {
+    signInWithEmailAndPassword(auth, email, password)
+      .catch((err) => setError(err.message));
+  };
+
+  const handleSignUp = () => {
+    createUserWithEmailAndPassword(auth, email, password)
+      .catch((err) => setError(err.message));
   };
 
   return (
-    <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-      <Text>Expo + Firebase Firestore 테스트</Text>
-      <Button title="데이터 추가" onPress={addData} />
+    <View style={{ padding: 20 }}>
+      <Text>이메일 / 비밀번호 로그인</Text>
+      <TextInput
+        placeholder="이메일"
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        style={{ borderWidth: 1, marginBottom: 10 }}
+      />
+      <TextInput
+        placeholder="비밀번호"
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+        style={{ borderWidth: 1, marginBottom: 10 }}
+      />
+      <Button title="로그인" onPress={handleLogin} />
+      <Button title="회원가입" onPress={handleSignUp} />
+      {error ? <Text style={{ color: "red" }}>{error}</Text> : null}
     </View>
   );
 }
