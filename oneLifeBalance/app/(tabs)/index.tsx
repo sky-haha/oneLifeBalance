@@ -1,10 +1,14 @@
-import React, { useMemo, useState, useEffect} from "react";
-import { View, StyleSheet, Dimensions, ScrollView, TouchableOpacity, Text } from "react-native";
-import { Calendar } from "react-native-calendars";
-import PieChart from "react-native-pie-chart"; //리액트 컴포넌트들 불러오기
-import { auth,db } from "./firebaseConfig";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, getDocs } from "firebase/firestore";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Animated, Dimensions, Easing, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Calendar } from "react-native-calendars";
+import PieChart from "react-native-pie-chart"; //리액트 컴포넌트들 불러오기
+
+//@ts-ignore (실행 자체는 문제가 없는데 이게 빨간줄떠서 찾아보니 이거 붙히면 없어지더라고요)
+import { auth, db } from "./firebaseConfig";
+
+
 const { width: SCREEN_WIDTH } = Dimensions.get("window"); //기기별 화면 너비를 SCREN_WIDTH로 저장
 
 export default function App() {
@@ -23,72 +27,94 @@ export default function App() {
 
   // 여기부터 로그인시 태스크 변화 함수 //
 
-function minutesToHHMM(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
-}
-
-function convertTimeRange(range: string): [string, string] {
-  const [startStr, endStr] = range.split("-");
-  const start = minutesToHHMM(Number(startStr));
-  const end = minutesToHHMM(Number(endStr));
-  return [start, end];
-}
-
-
-type Task = { title: string; start: string; end: string; color: string };
-
-async function fetchAllUserData(userId: string) {
-  const result: Record<string, Task[]> = {};
-
-  const dateTableRef = collection(db, "User", userId, "dateTable");
-  const dateSnap = await getDocs(dateTableRef);
-
-  for (const dateDoc of dateSnap.docs) {
-    const dateId = dateDoc.id; // 예: "2025-09-21"
-    result[dateId] = [];
-
-    // timeTable 하위 컬렉션 접근
-    const timeTableRef = collection(db, "User", userId, "dateTable", dateId, "timeTable");
-    const timeSnap = await getDocs(timeTableRef);
-
-    for (const timeDoc of timeSnap.docs) {
-      const data = timeDoc.data();
-      const [S,E] = convertTimeRange(timeDoc.id);
-      result[dateId].push({
-        title: data.purpose,
-        start: S,
-        end: E,
-        color: data.color,
-      });
-    }
+  function minutesToHHMM(minutes: number): string {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
   }
 
-  return result;
-}
-const [tasksByDate, setTasksByDate] = useState<Record<string, Task[]>>({});
+  function convertTimeRange(range: string): [string, string] {
+    const [startStr, endStr] = range.split("-");
+    const start = minutesToHHMM(Number(startStr));
+    const end = minutesToHHMM(Number(endStr));
+    return [start, end];
+  }
 
 
-useEffect(() => {
-  const uid=auth.currentUser?.uid;
-  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+  type Task = { title: string; start: string; end: string; color: string };
 
-    if (user&&uid) {
-      
-      const data = await fetchAllUserData(uid);
-      setTasksByDate(data
-        );
-       console.log("a");
-    } else {
-      setTasksByDate({});
-      console.log("b");
+  async function fetchAllUserData(userId: string) {
+    const result: Record<string, Task[]> = {};
+
+    const dateTableRef = collection(db, "User", userId, "dateTable");
+    const dateSnap = await getDocs(dateTableRef);
+
+    for (const dateDoc of dateSnap.docs) {
+      const dateId = dateDoc.id; // 예: "2025-09-21"
+      result[dateId] = [];
+
+      // timeTable 하위 컬렉션 접근
+      const timeTableRef = collection(db, "User", userId, "dateTable", dateId, "timeTable");
+      const timeSnap = await getDocs(timeTableRef);
+
+      for (const timeDoc of timeSnap.docs) {
+        const data = timeDoc.data();
+        const [S, E] = convertTimeRange(timeDoc.id);
+        result[dateId].push({
+          title: data.purpose,
+          start: S,
+          end: E,
+          color: data.color,
+        });
+      }
     }
-  });
 
-  return () => unsubscribe();
-});
-// 여기까지 //
+    return result;
+  }
+  const [tasksByDate, setTasksByDate] = useState<Record<string, Task[]>>({});
+
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+
+      if (user && uid) {
+
+        const data = await fetchAllUserData(uid);
+        setTasksByDate(data
+        );
+        console.log("a");
+      } else {
+        setTasksByDate({});
+        console.log("b");
+      }
+    });
+
+    return () => unsubscribe();
+  });
+  // 여기까지 //
+
+
+  // 스왑 애니메이션: 0이면 캘린더가 상단, 1이면 시간표가 상단으로 판단
+  const swapAnim = useRef(new Animated.Value(0)).current; 
+
+  //viewMode 변경 시 애니메이션 구동
+  useEffect(() => {
+    const toValue = viewMode === "calendarTop" ? 0 : 1;
+    Animated.timing(swapAnim, {
+      toValue,
+      duration: 280, // 애니메이션 지속시간
+      easing: Easing.out(Easing.cubic), // 시작은 빠르고 끝은 부드럽게 감속
+      useNativeDriver: true, // 자바스크립트 대신 리액트 네이티브에서 자체 처리(최적화)
+    }).start();
+  }, [viewMode, swapAnim]); 
+
+  //상/하단 페이드 + 슬라이드 보간값
+  const topOpacity = swapAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.9] }); 
+  const bottomOpacity = swapAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.9] }); 
+  const topTranslateY = swapAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -12] });
+  const bottomTranslateY = swapAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 12] }); 
+
 
 
   // 12:00, 04:00같은 문자열 시간을 240, 720과 같은 정수 분으로 변환(파이차트 조각 크기 계산을 위해선 분 단위 시간길이가 필요)
@@ -98,12 +124,12 @@ useEffect(() => {
   };
 
   // 선택 날짜에 따라 파이차트(원형시간표)배열 생성, 하루는 1440분으로 설정, 현재 선택된 날짜의 배열을 가져옴
-    const pieSlices = useMemo(() => { //useDemo는 특정 값 변경시에만 계산을 다시 수행하는 기능, 이 경우 선택 날이 바뀔 때만 파이차트를 변경
+  const pieSlices = useMemo(() => { //useDemo는 특정 값 변경시에만 계산을 다시 수행하는 기능, 이 경우 선택 날이 바뀔 때만 파이차트를 변경
     const DAY_MIN = 1440; //하루 전체 분 수는 1440
 
     //taskByDate는 날짜별로 일정을 모아둔 객체, selected는 현재 선택한 날짜, tasksByDate[selectedDate]는 선택된 날짜에 따른 일정을 가져옴
     //뒤의 || []; 는 selected에 해당 작업이 없어 반환되는게 없을 경우 오류 피하기 위해 빈 배열을 할당하는 역할
-    const dayTasks = tasksByDate[selectedDate] || []; 
+    const dayTasks = tasksByDate[selectedDate] || [];
 
     // dayTasks에 일정이 없다면, 조각 크기를 하루 전체로 설정하고 색상을 옅은 회색으로 채움
     if (!dayTasks.length) {
@@ -121,7 +147,7 @@ useEffect(() => {
     let cursor = 0; //cursor는 지금까지 채운 시각을 분 단위로 기록,처음은 자정 00:00에서 시작. 일정이 추가될 때마다 cursor를 해당 종료시각으로 옮김
 
 
-    
+
     for (const t of sorted) { //시작시간 순서대로 일정 배열
       const start = Math.max(0, Math.min(DAY_MIN, toMinutes(t.start)));
       const end = Math.max(0, Math.min(DAY_MIN, toMinutes(t.end))); // 각각 HH:MM을 분 단위로 변환, 0분 이상, 1440분 이하로 잘라내기
@@ -146,10 +172,10 @@ useEffect(() => {
 
     // 이렇게 만들어진 배열의 합이 전체 1440을 정확히 채움
     return slices;
-  }, [selectedDate]); 
+  }, [selectedDate]);
 
-    //해야 할 일을 텍ㄷ스트 문자열로 바꿔서 보여줌
-    const todosForSelected = useMemo(() => {
+  //해야 할 일을 텍ㄷ스트 문자열로 바꿔서 보여줌
+  const todosForSelected = useMemo(() => {
     const list = tasksByDate[selectedDate] || []; //선택된 날짜의 일정 배열을 가져옴, 없으면 오류 방지 위해 빈배열
 
     return list.map((t) => `${t.start} ~ ${t.end} ${t.title}`); //각 일정을 시작시간, 종료시간, 일정제목으로 보여줌
@@ -170,15 +196,21 @@ useEffect(() => {
     >
       <PieChart
         widthAndHeight={SCREEN_WIDTH * 0.7}
-        series={pieSlices} 
+        series={pieSlices}
       />
     </TouchableOpacity>
-  ); 
+  );
 
   return (
     <View style={styles.container}>
       {/* 상단 영역: 달력 또는 파이차트 */}
-      <View style={styles.topPane}>
+      {/* 상단 영역을 Animated.View로 래핑하여 페이드+슬라이드 적용 */}
+      <Animated.View
+        style={[
+          styles.topPane,
+          { opacity: topOpacity, transform: [{ translateY: topTranslateY }] },
+        ]}
+      >
         {viewMode === "calendarTop" ? (
           <ScrollView>
             <Calendar
@@ -194,13 +226,22 @@ useEffect(() => {
           // 시간표 클릭시 달력은 보이지 않고 파이차트가 위로 이동
           PieBlock
         )}
-      </View>
+      </Animated.View>
 
       {/* 가운데 구분선 */}
-      <View style={styles.divider} />
+      {/*구분선을 화면 정중앙에 절대 위치로 고정*/}
+      <View
+        pointerEvents="none"
+        style={[styles.divider, styles.dividerAbsolute]} 
+      />
 
       {/* 하단 영역: 파이차트(기본상태) 또는 할 일 목록(파이차트 클릭시) */}
-      <View style={styles.bottomPane}>
+      <Animated.View
+        style={[
+          styles.bottomPane,
+          { opacity: bottomOpacity, transform: [{ translateY: bottomTranslateY }] },
+        ]}
+      >
         {viewMode === "calendarTop" ? (
           // 기본: 파이차트는 아래쪽
           PieBlock
@@ -218,7 +259,7 @@ useEffect(() => {
             )}
           </ScrollView>
         )}
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -244,6 +285,15 @@ const styles = StyleSheet.create({ //기타 스타일
   divider: {
     height: 1,
     backgroundColor: "black",
+  },
+
+  dividerAbsolute: {
+    position: "absolute", // flex에 영향받지 않도록
+    left: 0,              
+    right: 0,           
+    top: "50%",        
+    transform: [{ translateY: -0.5 }],
+    zIndex: 1,            // 다른 요소들보다 가장 위로 
   },
 
   // 시간표 가로/세로 중앙 정렬 및 여백
