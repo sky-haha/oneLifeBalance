@@ -1,83 +1,221 @@
-import React, { useState } from "react";
-import { View, StyleSheet, Dimensions, ScrollView, TouchableOpacity, Text} from "react-native";
+import React, { useMemo, useState, useEffect} from "react";
+import { View, StyleSheet, Dimensions, ScrollView, TouchableOpacity, Text } from "react-native";
 import { Calendar } from "react-native-calendars";
 import PieChart from "react-native-pie-chart"; //리액트 컴포넌트들 불러오기
-
+import { auth,db } from "./firebaseConfig";
+import { onAuthStateChanged } from "firebase/auth";
+import { collection, getDocs } from "firebase/firestore";
 const { width: SCREEN_WIDTH } = Dimensions.get("window"); //기기별 화면 너비를 SCREN_WIDTH로 저장
 
 export default function App() {
   const today = new Date().toISOString().split("T")[0]; //날짜를 문자열로 구하기
   const [selectedDate, setSelectedDate] = useState(today); //앱 실행시 초기화면은 오늘날짜
 
-  // 캘린더/시간표 스왑 상태를 나타냄
-  const [viewMode, setViewMode] = useState<"calendarTop" | "scheduleTop">("calendarTop");
-
   //캘린더에서 날짜 클릭시 실행되는 함수
-  const handleDayPress = (day) => {
+  const handleDayPress = (day: { dateString: string }) => {
     setSelectedDate(day.dateString); //누른 날짜 상태에 저장
   };
 
-  // 아래 시간표 눌렀을 때 스왑
-  const handlePiePress = () => setViewMode("scheduleTop");
-  // 시간표를 다시 클릭 시 원상태로
-  const handleBackToCalendar = () => setViewMode("calendarTop");
+  // 캘린더/시간표 스왑 보기 모드 (원래 두줄이였는데 한줄로 하는법이 있더라고요)
+  const [viewMode, setViewMode] = useState<"calendarTop" | "scheduleTop">("calendarTop");
+
+
+
+  // 여기부터 로그인시 태스크 변화 함수 //
+
+function minutesToHHMM(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+}
+
+function convertTimeRange(range: string): [string, string] {
+  const [startStr, endStr] = range.split("-");
+  const start = minutesToHHMM(Number(startStr));
+  const end = minutesToHHMM(Number(endStr));
+  return [start, end];
+}
+
+
+type Task = { title: string; start: string; end: string; color: string };
+
+async function fetchAllUserData(userId: string) {
+  const result: Record<string, Task[]> = {};
+
+  const dateTableRef = collection(db, "User", userId, "dateTable");
+  const dateSnap = await getDocs(dateTableRef);
+
+  for (const dateDoc of dateSnap.docs) {
+    const dateId = dateDoc.id; // 예: "2025-09-21"
+    result[dateId] = [];
+
+    // timeTable 하위 컬렉션 접근
+    const timeTableRef = collection(db, "User", userId, "dateTable", dateId, "timeTable");
+    const timeSnap = await getDocs(timeTableRef);
+
+    for (const timeDoc of timeSnap.docs) {
+      const data = timeDoc.data();
+      const [S,E] = convertTimeRange(timeDoc.id);
+      result[dateId].push({
+        title: data.purpose,
+        start: S,
+        end: E,
+        color: data.color,
+      });
+    }
+  }
+
+  return result;
+}
+const [tasksByDate, setTasksByDate] = useState<Record<string, Task[]>>({});
+
+
+useEffect(() => {
+  const uid=auth.currentUser?.uid;
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+
+    if (user&&uid) {
+      
+      const data = await fetchAllUserData(uid);
+      setTasksByDate(data
+        );
+       console.log("a");
+    } else {
+      setTasksByDate({});
+      console.log("b");
+    }
+  });
+
+  return () => unsubscribe();
+});
+// 여기까지 //
+
+
+  // 12:00, 04:00같은 문자열 시간을 240, 720과 같은 정수 분으로 변환(파이차트 조각 크기 계산을 위해선 분 단위 시간길이가 필요)
+  const toMinutes = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    return h * 60 + m;
+  };
+
+  // 선택 날짜에 따라 파이차트(원형시간표)배열 생성, 하루는 1440분으로 설정, 현재 선택된 날짜의 배열을 가져옴
+    const pieSlices = useMemo(() => { //useDemo는 특정 값 변경시에만 계산을 다시 수행하는 기능, 이 경우 선택 날이 바뀔 때만 파이차트를 변경
+    const DAY_MIN = 1440; //하루 전체 분 수는 1440
+
+    //taskByDate는 날짜별로 일정을 모아둔 객체, selected는 현재 선택한 날짜, tasksByDate[selectedDate]는 선택된 날짜에 따른 일정을 가져옴
+    //뒤의 || []; 는 selected에 해당 작업이 없어 반환되는게 없을 경우 오류 피하기 위해 빈 배열을 할당하는 역할
+    const dayTasks = tasksByDate[selectedDate] || []; 
+
+    // dayTasks에 일정이 없다면, 조각 크기를 하루 전체로 설정하고 색상을 옅은 회색으로 채움
+    if (!dayTasks.length) {
+      return [{ value: DAY_MIN, color: "#eeeeee" }];
+    }
+
+    // 선택뇐 날짜의 작업들을 시작 시간 순서대로 정렬함
+    const sorted = [...dayTasks].sort(
+      (a, b) => toMinutes(a.start) - toMinutes(b.start)
+    );
+
+
+    // slices는 파이차트 컴포넌트에 넘겨줄 배열, 크기와 색깔이 쌓여 차트를 그림
+    const slices: { value: number; color: string }[] = [];
+    let cursor = 0; //cursor는 지금까지 채운 시각을 분 단위로 기록,처음은 자정 00:00에서 시작. 일정이 추가될 때마다 cursor를 해당 종료시각으로 옮김
+
+
+    
+    for (const t of sorted) { //시작시간 순서대로 일정 배열
+      const start = Math.max(0, Math.min(DAY_MIN, toMinutes(t.start)));
+      const end = Math.max(0, Math.min(DAY_MIN, toMinutes(t.end))); // 각각 HH:MM을 분 단위로 변환, 0분 이상, 1440분 이하로 잘라내기
+      if (end <= start) {
+        // 만약 종료시각이 시작시각과 같거나 이르면 잘못된 일정으로 판단하고 건너뒴
+        continue;
+      }
+
+      // 이전 종료부터 현재 시작까지의 일정 없는 구간은 무채색으로 칠함
+      if (start > cursor) {
+        slices.push({ value: start - cursor, color: "#eeeeee" });
+      }
+      // 실제 일정 구간은 해당 일정에 맞게 설정(현재는 임의로 설정한 값에 따름)
+      slices.push({ value: end - start, color: t.color });
+      cursor = end;
+    }
+
+    // 모든 일정이 끝난 후, 남은 구간 역시 무채색으로 칠함
+    if (cursor < DAY_MIN) {
+      slices.push({ value: DAY_MIN - cursor, color: "#eeeeee" });
+    }
+
+    // 이렇게 만들어진 배열의 합이 전체 1440을 정확히 채움
+    return slices;
+  }, [selectedDate]); 
+
+    //해야 할 일을 텍ㄷ스트 문자열로 바꿔서 보여줌
+    const todosForSelected = useMemo(() => {
+    const list = tasksByDate[selectedDate] || []; //선택된 날짜의 일정 배열을 가져옴, 없으면 오류 방지 위해 빈배열
+
+    return list.map((t) => `${t.start} ~ ${t.end} ${t.title}`); //각 일정을 시작시간, 종료시간, 일정제목으로 보여줌
+  }, [selectedDate]); //날짜가 바뀔 때 다시 실행
+
+  //여기까지 일정관련 끝 //
+
+
+
+  //파이차트 공통(아래/위 위치만 바뀜)
+  const PieBlock = (
+    <TouchableOpacity
+      activeOpacity={0.8}
+      onPress={() =>
+        setViewMode((m) => (m === "calendarTop" ? "scheduleTop" : "calendarTop"))
+      }
+      style={styles.pieCentered}
+    >
+      <PieChart
+        widthAndHeight={SCREEN_WIDTH * 0.7}
+        series={pieSlices} 
+      />
+    </TouchableOpacity>
+  ); 
 
   return (
-    <View style={styles.container}> {/*화면 전체 차지, 배경 흰색*/}
-      {/* 구분선 기준 위쪽 영역 */}
-      <View style={styles.topPane}> 
+    <View style={styles.container}>
+      {/* 상단 영역: 달력 또는 파이차트 */}
+      <View style={styles.topPane}>
         {viewMode === "calendarTop" ? (
-          <Calendar
-            initialDate={today} //첫 날짜는 오늘
-            onDayPress={handleDayPress} //날짜 누르면 위 함수 실행
-            markedDates={{
-              [selectedDate]: { selected: true, selectedColor: "blue" }, //선택 날짜 파란색으로 강조
-            }}
-            style={styles.calendar} //스타일
-          />
+          <ScrollView>
+            <Calendar
+              initialDate={today} //첫 날짜는 오늘
+              onDayPress={handleDayPress} //날짜 누르면 위 함수 실행
+              markedDates={{
+                [selectedDate]: { selected: true, selectedColor: "blue" }, //선택된 날짜 표시
+              }}
+              style={styles.calendar}
+            />
+          </ScrollView>
         ) : (
-          <TouchableOpacity onPress={handleBackToCalendar} activeOpacity={0.8}>
-            <View style={styles.pieCentered}> 
-              <PieChart
-                widthAndHeight={SCREEN_WIDTH * 0.7} //시간표 크기는 화면너비*0.7%
-                series={[
-                  { value: 25, color: 'red' },
-                  { value: 15, color: 'blue' },
-                  { value: 10, color: 'green' },
-                  { value: 5,  color: 'grey' },
-                  { value: 45, color: 'yellow' }, //구색 맞추기 우해 일단 시간표 설정은 임의로 설정
-                ]}
-              />
-            </View>
-          </TouchableOpacity>
+          // 시간표 클릭시 달력은 보이지 않고 파이차트가 위로 이동
+          PieBlock
         )}
       </View>
 
-      <View style={styles.divider} />{/*위아래를 구분하는 줄*/}
+      {/* 가운데 구분선 */}
+      <View style={styles.divider} />
 
-      {/* 구분선 기준 아래쪽 영역 */}
+      {/* 하단 영역: 파이차트(기본상태) 또는 할 일 목록(파이차트 클릭시) */}
       <View style={styles.bottomPane}>
         {viewMode === "calendarTop" ? (
-          // 기본은 위가 캘린더, 아래가 시간표
-          <TouchableOpacity onPress={handlePiePress} activeOpacity={0.8}>
-            <View style={styles.pieCentered}> 
-              <PieChart
-                widthAndHeight={SCREEN_WIDTH * 0.7} //시간표 크기는 화면너비*0.7%
-                series={[
-                  { value: 25, color: 'red' },
-                  { value: 15, color: 'blue' },
-                  { value: 10, color: 'green' },
-                  { value: 5,  color: 'grey' },
-                  { value: 45, color: 'yellow' }, //구색 맞추기 우해 일단 시간표 설정은 임의로 설정
-                ]}
-              />
-            </View>
-          </TouchableOpacity>
+          // 기본: 파이차트는 아래쪽
+          PieBlock
         ) : (
-          // 스왑된 상태일 때, 아래 부분은 할일 목록이 됨
+          // 파이차트 모드
           <ScrollView contentContainerStyle={styles.todoContainer}>
-            <Text style={styles.todoItem}>추후 여기에 할일 적힘</Text>
-            <Text style={styles.todoItem}>08:00 ~ 19:00 업무</Text>
+            {todosForSelected.length === 0 ? (
+              <Text style={styles.todoItem}>할 일을 설정하세요</Text>
+            ) : (
+              todosForSelected.map((line, idx) => (
+                <Text key={idx} style={styles.todoItem}>
+                  {line}
+                </Text>
+              ))
+            )}
           </ScrollView>
         )}
       </View>
