@@ -73,25 +73,21 @@ export default function App() {
   }
   const [tasksByDate, setTasksByDate] = useState<Record<string, Task[]>>({});
 
-
+ // 로그인(고장나면 바꿀것) //
   useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-
-      if (user && uid) {
-
-        const data = await fetchAllUserData(uid);
-        setTasksByDate(data
-        );
-        console.log("a");
-      } else {
-        setTasksByDate({});
-        console.log("b");
-      }
-    });
-
-    return () => unsubscribe();
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      const data = await fetchAllUserData(user.uid); // ← 여기서 바로 user.uid 사용
+      setTasksByDate(data);
+      console.log("a");
+    } else {
+      setTasksByDate({});
+      console.log("b");
+    }
   });
+  return unsubscribe;
+}, []);
+
   // 여기까지 //
 
 
