@@ -1,5 +1,6 @@
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs,setDoc ,doc} from "firebase/firestore";
+import { auth, db } from "./firebaseConfig";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Dimensions, Easing, ScrollView, StyleSheet, Text,
   TouchableOpacity, View, Modal, Platform, TextInput, KeyboardAvoidingView, Keyboard} from "react-native";
@@ -7,8 +8,6 @@ import { Calendar } from "react-native-calendars";
 import PieChart from "react-native-pie-chart";
 import DateTimePicker from "@react-native-community/datetimepicker"; //리액트 컴포넌트들 불러오기
 
-//@ts-ignore (실행 자체는 문제가 없는데 이게 빨간줄떠서 찾아보니 이거 붙히면 없어지더라고요)
-import { auth, db } from "./firebaseConfig";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window"); //기기별 화면 너비를 SCREN_WIDTH로 저장
 
@@ -208,6 +207,39 @@ export default function App() {
     animatePickerTo(false);
   };
 
+  // 랜덤 색상 생성기
+  const getRandomColor = () => {
+    const colors = ["#FF5733", "#33FF57", "#3357FF", "#F1C40F", "#9B59B6", "#1ABC9C"];
+    return colors[Math.floor(Math.random() * colors.length)];
+  };
+
+  //저장된 값 파이어베이스 저장함수
+  const firebaseSave =async()=>{
+    const user=auth.currentUser;
+    if(!user){
+      console.log("로그인 필요");
+      return;
+    }
+    const newTask={
+      toDo:title,
+      Date:selectedDate,
+      timeRange:
+    `${startDate.getHours() * 60 + startDate.getMinutes()}-${endDate.getHours() * 60 + endDate.getMinutes()}`,
+    };
+    
+    try {
+    await setDoc(
+      doc(db, "User", user.uid, "dateTable", newTask.Date, "timeTable", newTask.timeRange),
+      {
+        purpose: title,
+        color: getRandomColor(),
+      }
+    );
+  } catch (e) {
+    console.error("저장 실패:", e);
+  }
+      console.log(newTask);
+  }
   //파이차트 공통(아래/위 위치만 바뀜)
   const PieBlock = (
     <TouchableOpacity
@@ -355,7 +387,8 @@ export default function App() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionBtn, { backgroundColor: "black" }]}
-                onPress={() => {
+                onPress={async() => {
+                  firebaseSave();
                   closePicker(); 
                   setIsAddOpen(false);
                 }}
