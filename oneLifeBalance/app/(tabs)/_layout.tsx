@@ -12,7 +12,7 @@ export default function TabLayout() {
           borderTopColor: "#111827",
         },
         tabBarLabelStyle: { fontSize: 12 },
-        lazy:false,
+        lazy: false,
       }}
     >
       <Tabs.Screen
@@ -25,6 +25,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="objective"
+        options={{
+          title: "Objective",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="flag-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="explore"
         options={{
           title: "Explore",
@@ -32,11 +41,11 @@ export default function TabLayout() {
             <Ionicons name="paper-plane" size={size} color={color} />
           ),
         }}
-      /> {/*로그인 탭 추가*/}
+      />
       <Tabs.Screen
         name="login"
         options={{
-          title: "login",
+          title: "Login",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="lock-closed" size={size} color={color} />
           ),
