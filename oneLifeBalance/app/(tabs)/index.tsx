@@ -1,5 +1,5 @@
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, getDocs,setDoc ,doc} from "firebase/firestore";
+import { collection, getDocs,setDoc ,doc,onSnapshot} from "firebase/firestore";
 import { auth, db } from "./firebaseConfig";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Dimensions, Easing, ScrollView, StyleSheet, Text,
@@ -220,25 +220,30 @@ export default function App() {
       console.log("로그인 필요");
       return;
     }
-    const newTask={
-      toDo:title,
-      Date:selectedDate,
-      timeRange:
-    `${startDate.getHours() * 60 + startDate.getMinutes()}-${endDate.getHours() * 60 + endDate.getMinutes()}`,
-    };
+    const timeRange=`${startDate.getHours() * 60 + startDate.getMinutes()}-${endDate.getHours() * 60 + endDate.getMinutes()}`;
+    
     
     try {
+
+      await setDoc(
+      doc(db, "User", user.uid, "dateTable", String(selectedDate)),
+      {
+        voidMatter:true,
+      }
+    );
+
     await setDoc(
-      doc(db, "User", user.uid, "dateTable", newTask.Date, "timeTable", newTask.timeRange),
+      doc(db, "User", user.uid, "dateTable", String(selectedDate), "timeTable", String(timeRange)),
       {
         purpose: title,
         color: getRandomColor(),
       }
     );
+    
   } catch (e) {
     console.error("저장 실패:", e);
   }
-      console.log(newTask);
+      
   }
   //파이차트 공통(아래/위 위치만 바뀜)
   const PieBlock = (
