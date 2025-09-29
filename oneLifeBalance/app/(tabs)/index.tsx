@@ -7,7 +7,8 @@ import { Animated, Dimensions, Easing, ScrollView, StyleSheet, Text,
 import { Calendar } from "react-native-calendars";
 import PieChart from "react-native-pie-chart";
 import DateTimePicker from "@react-native-community/datetimepicker"; //리액트 컴포넌트들 불러오기
-
+// [add] 안드로이드 모달 타임피커 API 임포트
+import { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window"); //기기별 화면 너비를 SCREN_WIDTH로 저장
 
@@ -166,6 +167,17 @@ export default function App() {
   // 할일 입력 시 시작시간/종료시간 둘다 누르면 먼저 눌렀던 건 사라짐
   const [activePicker, setActivePicker] = useState<"start" | "end" | null>(null);
 
+  // [add] 안드로이드 모달 재오픈 방지 락
+  const androidPickerOpenRef = useRef(false);
+
+  // [add] (선택) 분 단위 5분 라운딩 — 안드로이드에서 minuteInterval이 없어서 통일감 위해 사용
+  const roundTo5 = (d: Date) => {
+    const copy = new Date(d);
+    const m = copy.getMinutes();
+    copy.setMinutes(Math.round(m / 5) * 5, 0, 0);
+    return copy;
+  };
+
   // 할일 입력 인터페이스 사라질 때 애니메이션
   const pickerAnim = useRef(new Animated.Value(0)).current;
   const animatePickerTo = (toOpen: boolean) => {
@@ -196,6 +208,31 @@ export default function App() {
   const openPicker = (target: "start" | "end") => {
     // 시간 버튼을 누를 때 키보드가 가리는 문제 고치는 부분
     Keyboard.dismiss(); 
+
+    // [add] 안드로이드는 모달 API로 열고, iOS만 인라인 유지
+    if (Platform.OS === "android") {
+      if (androidPickerOpenRef.current) return; // [add] 재오픈 방지
+      androidPickerOpenRef.current = true;
+
+      DateTimePickerAndroid.open({
+        mode: "time",
+        is24Hour: false, // 24시간제로 쓰려면 true
+        value: target === "start" ? startDate : endDate, // [add] 확정값을 기준으로 열기
+        onChange: (event, date) => {
+          if (event.type === "set" && date) {
+            const final = roundTo5(date); // [add] 5분 라운딩(원치 않으면 roundTo5 제거)
+            if (target === "start") setStartDate(final);
+            else setEndDate(final);
+          }
+          // [add] CANCEL(=dismissed) 포함, 닫히면 락 해제
+          androidPickerOpenRef.current = false;
+        },
+      });
+
+      return; // [add] 안드로이드는 아래(iOS 인라인) 로직 건너뜀
+    }
+
+    // iOS 인라인
     commitIfNeeded();
     setActivePicker(target);
     animatePickerTo(true);
@@ -353,26 +390,20 @@ export default function App() {
 
             {/* 단일 인터페이스 영역*/}
             <Animated.View style={{ height: pickerHeight, opacity: pickerOpacity, overflow: "hidden" }}>
-              {activePicker && (
+              {/* [add] iOS에서만 인라인 피커 렌더링 (Android는 모달로 대체) */}
+              {Platform.OS === "ios" && activePicker && (
                 <DateTimePicker
                   value={activePicker === "start" ? tempStart : tempEnd}
                   mode="time"
-                  display={Platform.OS === "ios" ? "spinner" : "default"}
-                  is24Hour={false} 
+                  display="spinner"
+                  is24Hour={false}
                   minuteInterval={5 as any}
                   onChange={(event, date) => {
-                    if (!date) {
-                      if (Platform.OS !== "ios") closePicker();
-                      return;
-                    }
+                    if (!date) return; // iOS는 dismiss 개념이 없음
                     if (activePicker === "start") {
                       setTempStart(date);
                     } else {
                       setTempEnd(date);
-                    }
-                    if (Platform.OS !== "ios" && event.type === "set") {
-                      commitIfNeeded();
-                      setActivePicker(null);
                     }
                   }}
                 />

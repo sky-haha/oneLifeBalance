@@ -42,6 +42,15 @@ export default function TabLayout() {
           ),
         }}
       />
+            <Tabs.Screen
+        name="objective"
+        options={{
+          title: "Objective",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="flag-outline" size={size} color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
