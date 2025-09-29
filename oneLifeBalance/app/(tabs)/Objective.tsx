@@ -1,9 +1,10 @@
-import React, { useMemo, useState, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Platform, KeyboardAvoidingView, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import Slider from "@react-native-community/slider"; //리액트 컴포넌트들
-
+import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
+import React, { useEffect, useMemo, useState } from "react";
+import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { auth, db } from "./firebaseConfig";
 // 상태 나타내기 위한 임시 로컬 타입/데이터
 type Goal = {
   id: string; //식별자
@@ -18,27 +19,26 @@ type Goal = {
 export default function ObjectiveScreen() { //오브젝티브 페이지의 메인 화면
   const [open, setOpen] = useState(false);
 
-  // 상태 나타내기 위한 임시 로컬 타입/데이터
-  const [goals, setGoals] = useState<Goal[]>([
-    {
-      id: "g1",
-      title: "설정한 목표가",
-      deadline: null,
-      minH: 1.0,
-      maxH: 2.0,
-      totalH: "30",
-      daySet: ["월", "수", "금"],
-    },
-    {
-      id: "g2",
-      title: "이렇게 보임",
-      deadline: new Date(),
-      minH: 0.5,
-      maxH: 3.0,
-      totalH: "50",
-      daySet: ["화", "목"],
-    },
-  ]); 
+  // ✅ Firestore 데이터 저장할 state (초기값은 빈 배열)
+  const [goals, setGoals] = useState<Goal[]>([]);
+
+  // ✅ Firestore 실시간 구독
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const q = collection(db, "User", uid, "objective");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data: Goal[] = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as Omit<Goal, "id">),
+        deadline: (d.data().deadline as any)?.toDate?.() ?? d.data().deadline ?? null, // 🔑 변환
+      }));
+      setGoals(data);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const [editOpen, setEditOpen] = useState(false); //편집 모달 열림/닫힘여부 상태
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null); //어떤 목표를 편집하는지를 확인하는 상태
@@ -58,7 +58,7 @@ export default function ObjectiveScreen() { //오브젝티브 페이지의 메�
               setEditOpen(true);          //편집 모달 오픈
             }}
           >
-            <Text style={styles.cardTitle}>{g.title}</Text> 
+            <Text style={styles.cardTitle}>{g.title}</Text>
             {/* 오브젝티브 메인에서, 각 카드들에 대한 간단 요약 */}
             <Text style={{ color: "#9ca3af", marginTop: 6 }}>
               {g.minH.toFixed(1)}h ~ {g.maxH.toFixed(1)}h • 총 {g.totalH}h • {g.daySet.join(" ")}
@@ -96,10 +96,27 @@ export default function ObjectiveScreen() { //오브젝티브 페이지의 메�
               {/* 목표 추가 시, 해당 모달은 create 모드 */}
               <ModalBody
                 onClose={() => setOpen(false)}
-                mode="create"                
-                initialValues={null}       
-                onPressPrimary={() => {}}     
-                onPressDelete={() => {}}       // 추가모드에선 삭제버튼 없음
+                mode="create"
+                initialValues={null}
+                onPressPrimary={async (values) => {
+                  try {
+                    const uid = auth.currentUser?.uid;
+                    if (!uid) return;
+
+                    const docRef = doc(collection(db, "User", uid, "objective"), values.id);
+                    await setDoc(docRef, {
+                      title: values.title,
+                      deadline: values.deadline,
+                      minH: values.minH,
+                      maxH: values.maxH,
+                      totalH: values.totalH,
+                      daySet: values.daySet,
+                    });
+                  } catch (e) {
+                    console.error("저장 실패:", e);
+                  }
+                }}
+                onPressDelete={() => { }}       // 추가모드에선 삭제버튼 없음
               />
             </View>
           </KeyboardAvoidingView>
@@ -123,8 +140,8 @@ export default function ObjectiveScreen() { //오브젝티브 페이지의 메�
                 onClose={() => setEditOpen(false)}
                 mode="edit"                      // 편집 모드 설정
                 initialValues={selectedGoal}     // 선택해 놓은 각종 요소의 값이 입력칸에 채워진 채 열림
-                onPressPrimary={() => {}}        // 형식상 수정 버튼, 아직 미구현
-                onPressDelete={() => {}}         // 형식상 삭제 버튼, 아직 미구현
+                onPressPrimary={() => { }}        // 형식상 수정 버튼, 아직 미구현
+                onPressDelete={() => { }}         // 형식상 삭제 버튼, 아직 미구현
               />
             </View>
           </KeyboardAvoidingView>
@@ -145,7 +162,7 @@ function ModalBody({
   onClose: () => void;
   mode?: "create" | "edit"; //모드는 추가/편집 둘중 하나
   initialValues?: Goal | null; //값들은 설정된 값/없음 둘중 하나
-  onPressPrimary?: () => void;
+  onPressPrimary?: (values: Goal) => void;
   onPressDelete?: () => void;
 }) {
   // 입력 관련 로컬 상태
@@ -157,7 +174,28 @@ function ModalBody({
   const [maxH, setMaxH] = useState<number>(2.0); //최대값
 
   const [daySet, setDaySet] = useState<string[]>([]); //선택한 요일 목록, 문자열 배열로
+  useEffect(() => {
+    if (!initialValues) {
+      if (mode === "create") {
+        setTitle("");
+        setDeadline(null);
+        setMinH(1.0);
+        setMaxH(2.0);
+        setTotalH("");
+        setDaySet([]);
+      }
+      return;
+    }
 
+    const deadlineValue = (initialValues.deadline as any)?.toDate?.() ?? initialValues.deadline ?? null;
+
+    setTitle(initialValues.title ?? "");
+    setDeadline(deadlineValue);
+    setMinH(initialValues.minH ?? 1.0);
+    setMaxH(initialValues.maxH ?? 2.0);
+    setTotalH(initialValues.totalH ?? "");
+    setDaySet(initialValues.daySet ?? []);
+  }, [initialValues, mode]);
   const deadlineLabel = useMemo(() => { //데드라인 설정
     if (!deadline) return "날짜 선택"; //미선택 시 텍스트 안내문구
     const yy = String(deadline.getFullYear()).slice(2);          // 년도. YY
@@ -351,8 +389,18 @@ function ModalBody({
         <TouchableOpacity
           style={[styles.btn, styles.btnPrimary]} //파란색 기본버튼
           onPress={() => {
-            // 수정버튼, 지금은 역할없음
-            onPressPrimary && onPressPrimary();
+            console.log("a");
+            if (onPressPrimary) {
+              onPressPrimary({
+                id: Date.now().toString(),
+                title,
+                deadline,
+                minH,
+                maxH,
+                totalH: TotalH,
+                daySet,
+              });
+            }
             onClose();
           }}
         >
@@ -366,7 +414,7 @@ function ModalBody({
 //스타일들
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0f0f0f" }, //배경
-  listContainer: { padding: 16, paddingBottom: 120, paddingTop: "18%"}, //리스트 내부 여백/하단 공백
+  listContainer: { padding: 16, paddingBottom: 120, paddingTop: "18%" }, //리스트 내부 여백/하단 공백
 
   card: {
     borderWidth: 2,
@@ -482,8 +530,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#1f2937",
   },
 
-  chipText: { color: "#9ca3af", fontWeight: "600", paddingRight: 3},
-  
+  chipText: { color: "#9ca3af", fontWeight: "600", paddingRight: 3 },
+
   chipTextActive: { color: "#e5e7eb" },
   //여기까지
 
@@ -501,7 +549,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  
+
   btnGhost: {
     borderWidth: 1,
     borderColor: "#374151",
@@ -510,11 +558,11 @@ const styles = StyleSheet.create({
 
   btnGhostText: { color: "#cbd5e1", fontWeight: "700" },
   //여기까지
-  
+
 
   //이 아래 기타 버튼 스타일
   btnPrimary: { backgroundColor: "#3b82f6" },
-  
+
   btnPrimaryText: { color: "#0b1220", fontWeight: "800" },
 
   btnTiny: {
