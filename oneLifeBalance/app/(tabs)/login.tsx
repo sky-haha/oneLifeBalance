@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import {View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Alert,} from "react-native";
 import { auth } from "./firebaseConfig.js";
 import { signInWithEmailAndPassword } from "firebase/auth"; //리액트 및 파이어베이스 기본 연동
+import { router } from "expo-router";
+
 
 export default function LoginScreen() { //이메일, 비밀번호, 비밀번호 표시, 로딩 상태 컴포넌트
   const [email, setEmail] = useState(""); // 이메일 입력값
@@ -79,11 +81,12 @@ export default function LoginScreen() { //이메일, 비밀번호, 비밀번호 
 
           {/* 회원가입 / 비번찾기 */}
           <TouchableOpacity
-            style={[styles.secondaryBtn, styles.disabled]}
-            disabled
+            style={styles.secondaryBtn}
+            activeOpacity={0.9}
+            onPress={() => router.push("/(tabs)/signup")}
           >
-            <Text style={[styles.secondaryBtnText, styles.disabledText]}>
-              회원가입 (준비중)
+            <Text style={styles.secondaryBtnText}>
+              회원가입
             </Text>
           </TouchableOpacity>
 
