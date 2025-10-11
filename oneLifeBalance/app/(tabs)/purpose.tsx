@@ -85,6 +85,10 @@ const DRAG_THRESHOLD_PX = 4;    // 드래그 시작으로 인정할 최소이동
 const DRAG_DELAY_MS = 80;       // 손가락 올린뒤 조금 홀드해야 드래그로전환(탭 무시되는 문제)
 const MIN_PROJECT_VY = 0.35;    // 이 속도 이상이면 블록들이 움직이도롱
 
+// 리사이즈 핸들 관련 설정
+const HANDLE_ZONE_PX = 24;       // 블록 내부 상/하단 '리사이즈 시작 구역' 높이(px)
+const RESIZE_SNAP_MIN = 15;      // 리사이즈 스냅 간격(분) — 빡빡함 완화용
+
 // purpose 메인화면
 export default function PurposeScreen() {
   //Index에서 전달받은 날짜 파라미터, 전달값없으면 일단 기본값은 오늘로
@@ -161,6 +165,21 @@ export default function PurposeScreen() {
     blocks.some((b) => b.id !== selfId && !(end <= b.start || start >= b.end));
 
   const contentHeight = HOUR_HEIGHT * 24;
+
+  // 리사이즈 중인지 추적
+  const [resizingId, setResizingId] = useState<null | {
+    id: string;
+    edge: "top" | "bottom";
+    origStart: number;
+    origEnd: number;
+  }>(null);
+
+  // 핸들 영역 판별(블록 내부 좌표계 locationY 기준)
+  const inTopHandleZone = (y: number) => y <= HANDLE_ZONE_PX;
+  const inBottomHandleZone = (y: number, hPx: number) => y >= hPx - HANDLE_ZONE_PX;
+
+  // 리사이즈 스냅
+  const snapResize = (min: number) => Math.round(min / RESIZE_SNAP_MIN) * RESIZE_SNAP_MIN;
 
   // 추가버튼 관련 모달
   //true면 모달 열림, false면 모달 닫힘
@@ -253,21 +272,38 @@ export default function PurposeScreen() {
 
               const responder = PanResponder.create({
                 //초기 터치 인식 관련
-                onStartShouldSetPanResponder: () => false,
-                onStartShouldSetPanResponderCapture: () => {
-                  touchStartTS = Date.now();
+
+                // 핸들 영역에서 시작되면 이동 제스처 시작 금지
+                onStartShouldSetPanResponder: (e) => {
+                  if (resizingId) return false; // 리사이즈 중이면 이동 금지
+                  const y = (e.nativeEvent as any).locationY ?? 0;
+                  if (inTopHandleZone(y) || inBottomHandleZone(y, height)) return false; // 핸들영역이면 이동X
                   return false;
                 },
-                onMoveShouldSetPanResponder: (_e, g) => {
+                onStartShouldSetPanResponderCapture: (e) => {
+                  touchStartTS = Date.now();
+                  const y = (e.nativeEvent as any).locationY ?? 0;
+                  // 캡처 단계에서도 핸들 영역이면 제스처 잡지 않음
+                  if (inTopHandleZone(y) || inBottomHandleZone(y, height)) return false;
+                  return false;
+                },
+                onMoveShouldSetPanResponder: (e, g) => {
+                  if (resizingId) return false;
+                  const y = (e.nativeEvent as any).locationY ?? 0;
+                  if (inTopHandleZone(y) || inBottomHandleZone(y, height)) return false; // 핸들영역이면 이동 X
                   const movedEnough = Math.abs(g.dy) >= DRAG_THRESHOLD_PX;
                   const delayed = Date.now() - touchStartTS >= DRAG_DELAY_MS;
                   return movedEnough && delayed;
                 },
-                onMoveShouldSetPanResponderCapture: (_e, g) => {
+                onMoveShouldSetPanResponderCapture: (e, g) => {
+                  if (resizingId) return false;
+                  const y = (e.nativeEvent as any).locationY ?? 0;
+                  if (inTopHandleZone(y) || inBottomHandleZone(y, height)) return false;
                   const movedEnough = Math.abs(g.dy) >= DRAG_THRESHOLD_PX;
                   const delayed = Date.now() - touchStartTS >= DRAG_DELAY_MS;
                   return movedEnough && delayed;
                 },
+
                 //드래그 시작 시
                 onPanResponderGrant: () => {
                   setDraggingId(b.id);
@@ -291,13 +327,13 @@ export default function PurposeScreen() {
                   newStartMin = clamp(newStartMin, 0, 1440 - dragDurationMin);
                   const newEndMin = newStartMin + dragDurationMin;
                   //겹쳤을때
-                  if (hasOverlap(newStartMin, newEndMin, b.id)) {
+                  /*if (hasOverlap(newStartMin, newEndMin, b.id)) {
                     Animated.spring(dragY, { toValue: 0, useNativeDriver: false }).start(() => {
                       setDraggingId(null);
                       setScrollLock(false);
                     });
                     return;
-                  }
+                  }*/
                   {/*날짜별 일정 데이터를 담음 */}
                   setByDate((prev) => ({
                     ...prev,
@@ -322,6 +358,81 @@ export default function PurposeScreen() {
                   });
                 },
               });
+
+              // 상단 길이조절 핸들 PanResponder
+              const handleTopDrag = PanResponder.create({
+                onStartShouldSetPanResponder: () => true,
+                onStartShouldSetPanResponderCapture: () => true, // 부모 제스처(이동/스크롤) 차단
+                onMoveShouldSetPanResponder: () => true,
+                onMoveShouldSetPanResponderCapture: () => true,
+                onPanResponderGrant: () => {
+                  setResizingId({ id: b.id, edge: "top", origStart: b.start, origEnd: b.end });
+                  setScrollLock(true); // 리사이즈 중 스크롤 차단
+                },
+                onPanResponderMove: (_e, g) => {
+                  // 위로 드래그하면 시작 시간이 앞당겨짐 → dy는 음수
+                  // 미리보기 없이 release때만 반영(단순)
+                },
+                onPanResponderRelease: (_e, g) => {
+                  const deltaMinRaw = minutesFromTopPx(-g.dy);
+                  const deltaMin = snapResize(deltaMinRaw);
+                  let newStart = clamp(b.start - deltaMin, 0, b.end - 5);
+                  /*if (hasOverlap(newStart, b.end, b.id)) {
+                    // 겹치면 되돌림
+                  } else {*/
+                    setByDate((prev) => ({
+                      ...prev,
+                      [selectedDate]: (prev[selectedDate] || []).map((x) =>
+                        x.id === b.id ? { ...x, start: newStart } : x
+                      ),
+                    }));
+
+                  setResizingId(null);
+                  setScrollLock(false);
+                },
+                onPanResponderTerminationRequest: () => false,
+                onPanResponderTerminate: () => {
+                  setResizingId(null);
+                  setScrollLock(false);
+                },
+              });
+
+              // 하단 길이조절 핸들 PanResponder
+              const handleBottomDrag = PanResponder.create({
+                onStartShouldSetPanResponder: () => true,
+                onStartShouldSetPanResponderCapture: () => true, // 부모 제스처 차단
+                onMoveShouldSetPanResponder: () => true,
+                onMoveShouldSetPanResponderCapture: () => true,
+                onPanResponderGrant: () => {
+                  setResizingId({ id: b.id, edge: "bottom", origStart: b.start, origEnd: b.end });
+                  setScrollLock(true);
+                },
+                onPanResponderMove: (_e, g) => {
+                  // 아래로 드래그하면 종료 시간이 뒤로 밀림 → dy는 양수
+                },
+                onPanResponderRelease: (_e, g) => {
+                  const deltaMinRaw = minutesFromTopPx(g.dy);
+                  const deltaMin = snapResize(deltaMinRaw);
+                  let newEnd = clamp(b.end + deltaMin, b.start + 5, 1440);
+                 /* if (hasOverlap(b.start, newEnd, b.id)) {
+                    // 겹치면 되돌림
+                  } else {*/
+                    setByDate((prev) => ({
+                      ...prev,
+                      [selectedDate]: (prev[selectedDate] || []).map((x) =>
+                        x.id === b.id ? { ...x, end: newEnd } : x
+                      ),
+                    }));
+                  setResizingId(null);
+                  setScrollLock(false);
+                },
+                onPanResponderTerminationRequest: () => false,
+                onPanResponderTerminate: () => {
+                  setResizingId(null);
+                  setScrollLock(false);
+                },
+              });
+
               //드래그중인지 확인
               const isDragging = draggingId === b.id;
               const translateY = isDragging ? dragY : 0;
@@ -343,6 +454,25 @@ export default function PurposeScreen() {
                     },
                   ]}
                 >
+                  {/* 상단 길이조절 핸들*/}
+                  <View
+                    pointerEvents="box-only"
+                    {...handleTopDrag.panHandlers}
+                    style={styles.handleTop}
+                  >
+                    {/* 시각효과 */}
+                    <View style={{ width: 36, height: 3, borderRadius: 3, backgroundColor: "#E5E7EB", opacity: 0.9 }} />
+                  </View>
+
+                  {/* 하단 길이조절 핸들 */}
+                  <View
+                    pointerEvents="box-only"
+                    {...handleBottomDrag.panHandlers}
+                    style={styles.handleBottom}
+                  >
+                    <View style={{ width: 36, height: 3, borderRadius: 3, backgroundColor: "#E5E7EB", opacity: 0.9 }} />
+                  </View>
+
                   {/*드래그중일때 표시되는 반투명 이동중 오버레이*/}
                   {isDragging && (
                     <View style={styles.movingOverlay}>
@@ -674,4 +804,34 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   fabText: { color: "#0B1220", fontSize: 26, fontWeight: "800", marginTop: -2 },
+
+  // 리사이즈 핸들
+  handleTop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 28,
+    marginTop: -8,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 3,
+  },
+  handleBottom: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 28,
+    marginBottom: -8,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 3,
+  },
 });
