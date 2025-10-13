@@ -59,7 +59,17 @@ export default function TabLayout() {
           headerShown: false,   
         }}
       />
+        <Tabs.Screen
+        name="playground"
+        options={{
+          title: "playground",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="flag-outline" size={size} color={color} />
+          ),
+        }}
+        />
     </Tabs>
+    
     
   );
 }
