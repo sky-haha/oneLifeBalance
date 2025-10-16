@@ -1,425 +1,454 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Platform, Modal, KeyboardAvoidingView, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import React, { useMemo, useState } from "react";
+import { View, Text, StyleSheet, Dimensions, ScrollView,
+TouchableOpacity, Modal, KeyboardAvoidingView, Platform,
+TextInput } from "react-native";
+import { useRouter } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 
-type Category = "sleep" | "work" | "goal"; //수면/업무/목표 3가지 카테고리의 문자열 리터럴 타입
-type DayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6; //각 날짜들의 인덱스 타입
+//유틸리티 함수들
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-type TimeBlock = { id: string; days: boolean[]; start: Date; end: Date; };// id는 고유 키, days는 날짜 배열, start/end는 시작,종료 시간
-
-const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"]; // 요일 표기용 라벨들
-
-const fmtTime = (d: Date) =>
-  `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; //시간 문자열 포맷
-
-const daysToLabel = (arr: boolean[]) => { //true인 요일만 골라 월-화 등으로 합침, 전부면 매일, 하나도 없으면 요일 미지정
-  const list = DAY_LABELS.filter((_, i) => arr[i]);
-  return list.length === 7 ? "매일" : list.length ? list.join("·") : "요일 미지정";
+// 색상 팔레트
+const C = {
+  bg: "#0B1220",    
+  card: "#0F172A",   
+  border: "#1F2937", 
+  text: "#E5E7EB",  
+  textDim: "#9CA3AF",
+  primary: "#3B82F6",
 };
 
-function setHM(h: number, m: number) { //오늘 날짜 기준으로 시/분 지정된 Date 생성
-  const d = new Date();
-  d.setHours(h, m, 0, 0);
-  return d;
-}
+// 시간 관련 함수들
 
-export default function ExploreScreen() { //모달 제어 함수
-  const [active, setActive] = useState<null | Category>(null);
+// 분 단위 숫자를 HH:MM 형식 문자열로 변환 (예: 540 -> 09:00)
+const toHHMM = (m: number) => {
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+};
+// Date 객체를 00:00 기준 총 경과 분으로 변환
+const fromDateToMinutes = (d: Date) => d.getHours() * 60 + d.getMinutes();
+// 분 단위 숫자를 오늘 날짜의 Date 객체로 변환
+const toDateFromMinutes = (minutes: number) => {
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+  base.setMinutes(minutes);
+  return base;
+};
+// 미리 정의된 색상 팔레트에서 랜덤으로 색상 하나를 선택
+const randomColor = () => {
+  const colors = ["#60A5FA", "#34D399", "#F59E0B", "#F472B6", "#A78BFA", "#F87171"];
+  return colors[(Math.random() * colors.length) | 0];
+};
 
-  // 여기에 목록 데이터들이 담김
-  const [sleepBlocks] = useState<TimeBlock[]>([]); // 수면 시간 데이터 
-  const [workBlocks] = useState<TimeBlock[]>([]);  // 업무 시간 데이터 
-  const [goalBlocks] = useState<TimeBlock[]>([]);  // 목표 시간 데이터 
+// --- 타입 정의 ---
+// 일정 하나를 나타내는 데이터 구조
+type Block = { id: string; start: number; end: number; color: string; purpose?: string };
 
-  //모달 하단 요일 필터 관련, -1이면 전체선택, 0~6이면 해당요일 표시
-  const [filterDay, setFilterDay] = useState<number>(-1);
+// 요일별 나타내기 위한 임시 데이터 
+const makeId = () => Math.random().toString(36).slice(2, 9);
+const buildInitialFixedSchedules = () => {
+  return {
+    'mon': [
+      { id: makeId(), start: 540, end: 1080, color: "#60A5FA", purpose: "업무" },
+      { id: makeId(), start: 1140, end: 1260, color: "#F59E0B", purpose: "점심 시간" },
+    ],
+    'tue': [{ id: makeId(), start: 540, end: 1080, color: "#60A5FA", purpose: "업무" }],
+    'wed': [
+      { id: makeId(), start: 540, end: 1080, color: "#60A5FA", purpose: "업무" },
+      { id: makeId(), start: 1200, end: 1320, color: "#34D399", purpose: "스터디" },
+    ],
+    'thu': [{ id: makeId(), start: 540, end: 1080, color: "#60A5FA", purpose: "업무" }],
+    'fri': [{ id: makeId(), start: 540, end: 960, color: "#60A5FA", purpose: "업무 (단축)" }],
+    'sat': [],
+    'sun': [],
+  } as Record<string, Block[]>;
+};
 
-  // + 눌렀을 때 뜨는 추가 모달을 제어하는 상태들 정의, 예시 표기 위해 초기값 잡아놓음
-  const [addOpen, setAddOpen] = useState(false); //열림/닫힘 스위치
-  const [addForCategory, setAddForCategory] = useState<Category>("sleep"); //카테고리 확인
-  const [addStart, setAddStart] = useState<Date>(() => setHM(9, 0)); 
-  const [addEnd, setAddEnd] = useState<Date>(() => setHM(18, 0)); //시작/종료 시간
-  const [addDays, setAddDays] = useState<boolean[]>([true, true, true, true, true, false, false]); //날짜
-  const [showAddStartPicker, setShowAddStartPicker] = useState(false); 
-  const [showAddEndPicker, setShowAddEndPicker] = useState(false); //시작/종료 시간 피커
+// UI 관련
+const HOUR_HEIGHT = 44; // 타임라인에서 1시간의 높이(px)
+const HOURS = Array.from({ length: 25 }, (_, i) => i); // 0시부터 24시까지 시간 눈금 배열
+const LABEL_GUTTER = 56; // 왼쪽 시간 레이블 영역의 너비(px)
 
-  //카테고리 모달, 다른 모달 열려있으면 먼저 닫고 필터 리셋 후 해당 모달 활성화
-  const openCategoryModal = (cat: Category) => {
-    if (addOpen) closeAddModal(false);
-    setFilterDay(-1);
-    setActive(cat);
+// 상단 요일 선택 버튼
+const DAYS = [
+    { key: 'mon', label: '월' }, { key: 'tue', label: '화' },
+    { key: 'wed', label: '수' }, { key: 'thu', label: '목' },
+    { key: 'fri', label: '금' }, { key: 'sat', label: '토' },
+    { key: 'sun', label: '일' },
+];
+
+// 메인 컴포넌트
+export default function FixedScheduleScreen() {
+  const router = useRouter();
+  const [selectedDay, setSelectedDay] = useState('mon'); // 현재 선택된 요일, 기본값은 월요일
+
+  // 요일별 전체 고정 일정 데이터를 관리하는 state
+  const [byDay, setByDay] = useState<Record<string, Block[]>>(buildInitialFixedSchedules());
+  
+  // 전체 데이터에서 현재 선택된 요일에 해당하는 일정 목록만 추출
+  const blocks = useMemo(() => byDay[selectedDay] || [], [byDay, selectedDay]);
+
+  // 겹치는 일정들의 레이아웃을 동적으로 계산하는 로직
+  const blockLayouts = useMemo(() => {
+    // 모든 일정을 시작 시간 순서로 정렬
+    const sorted = [...blocks].sort((a, b) => a.start - b.start);
+    if (sorted.length === 0) return new Map(); // 일정이 없으면 빈 Map
+
+    // 최종 레이아웃 정보를 담을 Map과 이미 처리된 일정을 기록할 Set 초기화
+    const layouts = new Map<string, { top: number; height: number; left: string; width: string }>();
+    const processed = new Set<string>();
+
+    // 정렬된 일정을 순회하며 겹치는 그룹 찾기
+    for (const block of sorted) {
+      if (processed.has(block.id)) continue; // 이미 그룹화된 일정이면 건너뛰기
+
+      // 현재 일정과 직/간접적으로 연결된 모든 겹치는 일정을 그룹으로 묶음
+      const group: Block[] = [];
+      const findOverlapsRecursive = (b: Block) => {
+        group.push(b);
+        processed.add(b.id);
+        for (const other of sorted) {
+          if (processed.has(other.id)) continue;
+          if (b.end > other.start && b.start < other.end) {
+            findOverlapsRecursive(other);
+          }
+        }
+      };
+      findOverlapsRecursive(block);
+
+      // 그룹 내의 일정들을 길이가 짧은 순서대로 다시 정렬
+      const groupSortedByDuration = group.sort((a, b) => (a.end - a.start) - (b.end - b.start));
+      const totalColumns = groupSortedByDuration.length;
+
+      // 정렬된 순서를 열로사용, 오른쪽에 가장 긴 일정
+      groupSortedByDuration.forEach((b, colIndex) => {
+        layouts.set(b.id, {
+          top: (b.start / 60) * HOUR_HEIGHT,
+          height: ((b.end - b.start) / 60) * HOUR_HEIGHT,
+          left: `${(100 / totalColumns) * colIndex}%`,
+          width: `${100 / totalColumns}%`,
+        });
+      });
+    }
+    return layouts; // 계산된 레이아웃 Map 반환
+  }, [blocks]);
+
+
+  // 편집/추가 모달 관련 상태 및 함수들
+  const [editingBlock, setEditingBlock] = useState<Block | null>(null); // 현재 편집 중인 일정 객체
+  const [isAddModal, setIsAddModal] = useState(false); // 추가 모달인지 편집 모달인지 구분
+  const [editPurpose, setEditPurpose] = useState<string>(""); // 모달 내 이름 입력값
+  const [startTime, setStartTime] = useState<Date>(toDateFromMinutes(540)); // 모달 내 시작 시간
+  const [endTime, setEndTime] = useState<Date>(toDateFromMinutes(600)); // 모달 내 종료 시간
+  const [showPicker, setShowPicker] = useState<null | "start" | "end">(null); // 피커 표시 여부
+
+  // 편집 모달을 여는 함수
+  const openEditModal = (b: Block) => {
+    setEditingBlock(b); // 편집할 일정 객체 설정
+    setIsAddModal(false); // 추가 모드가 아님을 명시
+    setEditPurpose(b.purpose ?? ""); // 기존 이름 불러오기
+    setStartTime(toDateFromMinutes(b.start)); // 기존 시간 불러오기
+    setEndTime(toDateFromMinutes(b.end));
+  };
+
+  // 추가 모달을 여는 함수
+  const openAddModal = () => {
+    setEditingBlock(null); // 편집할 일정이 없음
+    setIsAddModal(true); // '추가' 모드임을 명시
+    setEditPurpose(""); // 입력 필드 초기화
+    setStartTime(toDateFromMinutes(540)); // 기본 시간(09:00)으로 설정
+    setEndTime(toDateFromMinutes(600)); // 기본 시간(10:00)으로 설정
   };
 
-  //+버튼 클릭 시 위에서 정의한 상태 제거 및 초기화 함수
-  const openAdd = (cat: Category) => {
-    setActive(null);
-    setAddForCategory(cat);
-    setAddStart(setHM(9, 0));
-    setAddEnd(setHM(18, 0));
-    setAddDays([true, true, true, true, true, false, false]); 
-    setShowAddStartPicker(false);
-    setShowAddEndPicker(false); //기존 모달 상태 초기회
-    setAddOpen(true); //추가 모달 열기
-  };
+  // 모달을 닫는 함수
+  const closeModal = () => {
+    setEditingBlock(null);
+    setIsAddModal(false);
+    setShowPicker(null);
+  };
 
-  //닫기 모달
-  const closeAddModal = (reopenCategory = true) => {
-    setShowAddStartPicker(false); //ui 상태 정리
-    setShowAddEndPicker(false);
-    setAddOpen(false);
-    if (reopenCategory) setActive(addForCategory); //조건부로 이전 모달 다시 열기
-  };
+  // 모달에서 저장 버튼을 눌렀을 때 실행되는 함수
+  const saveChanges = () => {
+    const s = fromDateToMinutes(startTime);
+    const e = fromDateToMinutes(endTime);
+    if (e <= s) return; // 종료 시간이 시작 시간보다 빠르면 저장하지 않음
 
-  //목록에 있는 것들 저장하지 않고 닫기만 함
-  const confirmAddWithoutSaving = () => {
-    closeAddModal(true);
-  };
+    if (isAddModal) { // 추가 모드일 경우
+        const newBlock: Block = { id: makeId(), start: s, end: e, purpose: editPurpose, color: randomColor() };
+        // 현재 선택된 요일의 일정 배열에 새 블록 추가
+        setByDay(prev => ({
+            ...prev,
+            [selectedDay]: [...(prev[selectedDay] || []), newBlock]
+        }));
+    } else if (editingBlock) { // 편집 모드일 경우
+        // 현재 선택된 요일의 일정 배열에서 id가 일치하는 항목을 찾아 내용 업데이트
+        setByDay(prev => ({
+          ...prev,
+          [selectedDay]: (prev[selectedDay] || []).map((b) =>
+            b.id === editingBlock.id ? { ...b, start: s, end: e, purpose: editPurpose } : b
+          ),
+        }));
+    }
+    closeModal(); // 저장 후 모달 닫기
+  };
 
-  //filterday 기준으로 선택된 요일 칩을 필터링해, 각 시간 블록 배열에서 해당일이 포함된 항목만 보여줌
-  const filteredBlocks = (cat: Category) => {
-    const src = cat === "sleep" ? sleepBlocks : cat === "work" ? workBlocks : goalBlocks;
-    if (filterDay === -1) return src;
-    return src.filter((b) => b.days[filterDay as DayIndex]);
-  };
+  const contentHeight = HOUR_HEIGHT * 24; // 스크롤 뷰의 전체 높이 계산
 
-  //카테고리 -> 한글 타이틀 매핑
-  const catTitle = (cat: Category) => (cat === "sleep" ? "수면 시간" : cat === "work" ? "업무 시간" : "목표 시간");
-
-  //렌더    
-  return ( //전체 화면 컨테이너
-    <View style={{ flex: 1, backgroundColor: "#000" }}> 
-      <ScrollView
-        style={{ flex: 1, backgroundColor: "#000" }}                  //  스크롤 영역 배경
-        contentContainerStyle={{ padding: 20, paddingTop: 40, flexGrow: 1 }} //  빈 공간까지 채움
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.title}>시간 유형</Text>
-
-        {/*카드 컨테이너*/}
-        <View style={styles.card}>
-          <Pressable style={styles.menuBtn} onPress={() => {}} android_ripple={{ color: "transparent" }}>
-            <Text style={styles.menuBtnText}>시간 유형 설정</Text>
-          </Pressable>
-           {/*구분선*/}
-          <View style={styles.divider} />
-
-           {/*수면 시간 설정 버튼*/}
-          <View style={styles.stack}>
-            <Pressable
-              style={({ pressed }) => [styles.primaryBtn, styles.shadow, pressed && Platform.OS === "ios" ? { opacity: 0.9 } : null]} //버튼
-              onPress={() => openCategoryModal("sleep")}
-              android_ripple={{ color: "transparent" }}
-            >
-              <Text style={styles.primaryBtnText}>수면 시간</Text>
-            </Pressable>
-
-            {/*업무 시간 설정 버튼*/}
-            <Pressable
-              style={({ pressed }) => [styles.primaryBtn, styles.shadow, pressed && Platform.OS === "ios" ? { opacity: 0.9 } : null]}
-              onPress={() => openCategoryModal("work")}
-              android_ripple={{ color: "transparent" }}
-            >
-              <Text style={styles.primaryBtnText}>업무 시간</Text>
-            </Pressable>
-
-            {/*목표 시간 설정 버튼*/}
-            <Pressable
-              style={({ pressed }) => [styles.primaryBtn, styles.shadow, pressed && Platform.OS === "ios" ? { opacity: 0.9 } : null]}
-              onPress={() => openCategoryModal("goal")}
-              android_ripple={{ color: "transparent" }}
-            >
-              <Text style={styles.primaryBtnText}>목표 시간</Text>
-            </Pressable>
-          </View>
+  return (
+    <View style={styles.container}>
+      <SafeAreaView edges={["top"]} style={styles.safeTop}>
+        {/* 상단 헤더 */}
+        <View style={styles.header}>
+            <Text style={styles.headerTitle}>고정 시간 설정</Text>
         </View>
+        {/* 상단 요일 선택 바 */}
+        <View style={styles.daySelector}>
+            {DAYS.map(day => (
+                <TouchableOpacity 
+                    key={day.key} 
+                    style={[styles.dayButton, selectedDay === day.key && styles.dayButtonSelected]}
+                    onPress={() => setSelectedDay(day.key)}
+                >
+                    <Text style={[styles.dayButtonText, selectedDay === day.key && styles.dayButtonTextSelected]}>
+                        {day.label}
+                    </Text>
+                </TouchableOpacity>
+            ))}
+        </View>
+      </SafeAreaView>
 
-        {/* 카테고리별 모달 */}
-        {(["sleep", "work", "goal"] as Category[]).map((cat) =>
-          active === cat ? ( // 모달 제목을 수면/업무/목표로 표시 및 닫기/확인 버튼
-            <BaseModal key={cat} title={catTitle(cat)} onClose={() => setActive(null)} onPrimary={() => setActive(null)}>
-              {/* 아직 데이터추가가 없어서 설정된 시간 없다고 뜸, 원래는 설정된 시간 없으면 뜨는 문구 */}
-              <View style={{ gap: 10 }}>
-                <View style={styles.emptyCard}>
-                  <Text style={styles.emptyText}>아직 설정된 시간이 없습니다.</Text>
-                </View>
-              </View>
+      {/* 타임라인 스크롤 뷰 */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ height: contentHeight }}
+        contentInsetAdjustmentBehavior="never"
+      >
+        <View style={styles.timelineRow}>
+          {/* 왼쪽 시간 눈금 영역 */}
+          <View style={[styles.leftRail, { height: contentHeight }]}>
+            {HOURS.map((h) => (
+              <View key={h} style={[styles.hourRow, { height: HOUR_HEIGHT }]}>
+                {h < 24 && <Text style={styles.hourLabel}>{`${h}:00`}</Text>}
+                <View style={styles.hourLine} />
+              </View>
+            ))}
+          </View>
 
-              {/* + 버튼 (모달 창 열리고 피커만 보이며, 버튼 눌러도 저장안됨 */}
-              <View style={{ alignItems: "center", marginVertical: 14 }}>
-                <Pressable onPress={() => openAdd(cat)} style={styles.plusBtn} android_ripple={{ color: "transparent" }}>
-                  <Ionicons name="add" size={20} color="#0b1220" />
-                </Pressable>
-              </View>
+          {/* 오른쪽 일정 블록이 그려지는 캔버스 영역 */}
+          <View style={[styles.canvas, { height: contentHeight }]}>
+            {/* 시간별 가로선 그리기 */}
+            {HOURS.map((h) => (
+              <View key={`grid-${h}`} style={[styles.gridLine, { top: h * HOUR_HEIGHT }]} />
+            ))}
+            {/* 계산된 레이아웃에 따라 일정 블록들 그리기 */}
+            {blocks.map((b) => {
+              const layout = blockLayouts.get(b.id);
+              if (!layout) return null;
+              return (
+                <View key={b.id} style={[ styles.block, { ...layout, backgroundColor: b.color }]}>
+                  {/* 블록을 누르면 수정 모달이 열림 */}
+                  <TouchableOpacity activeOpacity={0.7} onPress={() => openEditModal(b)} style={{ flex: 1, overflow: 'hidden' }}>
+                      <Text style={styles.blockTitle} numberOfLines={1}>{b.purpose ?? "할 일"}</Text>
+                      <Text style={styles.blockTime}>
+                        {toHHMM(b.start)} ~ {toHHMM(b.end)}
+                      </Text>
+                    </TouchableOpacity>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      </ScrollView>
 
-              {/* 요일 필터 */}
-              <View style={styles.filterRow}>
-                <Chip label="전체" active={filterDay === -1} onPress={() => setFilterDay(-1)} />
-                {DAY_LABELS.map((d, i) => (
-                  <Chip key={d} label={d} active={filterDay === i} onPress={() => setFilterDay(i)} />
-                ))}
-              </View>
-            </BaseModal>
-          ) : null
-        )}
+      {/* 우하단 추가 버튼 */}
+      <TouchableOpacity style={styles.fab} activeOpacity={0.9} onPress={openAddModal}>
+        <Text style={styles.fabText}>＋</Text>
+      </TouchableOpacity>
 
-        {/*  UI만 있음. 확인눌러도 저장안함 */}
-        {addOpen ? (
-          <AddModal title={`${catTitle(addForCategory)} 추가`} onClose={() => closeAddModal(true)}> {/*수면 시간 추가 등 제목, 닫기버튼 누르면 모달 닫힘*/}
-            {/* 시작, 피커 표시 */}
-            <Text style={styles.label}>시작</Text>
-            <Pressable
-              style={styles.input}
-              onPress={() => {
-                setShowAddStartPicker(true);
-                setShowAddEndPicker(false);
-              }}
-              android_ripple={{ color: "transparent" }}
-            >
-              {/*내부 레이아웃, 좌측 시간 텍스트 및 우측 시계 아이콘*/}
-              <View style={styles.rowBetween}>
-                <Text style={styles.inputText}>{fmtTime(addStart)}</Text>
-                <Ionicons name="time-outline" size={18} color="#9ca3af" />
-              </View>
-            </Pressable>
-            {/*실제 시간 선택 피커*/}
-            {showAddStartPicker && (
-              <DateTimePicker
-                value={addStart} //현재 선택된 시간 값
-                mode="time" //시간선택 모드 변경
-                is24Hour 
-                display={Platform.select({ ios: "spinner", android: "default" })} //ios는 스피너, 안드는 기본형으로
-                //시간 변경 시 호출되어 새 시간으로 상태 업데이트, 안드ㅡ이 경우 자동으로 피커 닫음
-                onChange={(_, d) => {
-                  if (d) setAddStart(d);
-                  if (Platform.OS === "android") setShowAddStartPicker(false);
-                }}
+      {/* 추가/편집 모달 */}
+      <Modal visible={!!editingBlock || isAddModal} transparent animationType="fade" onRequestClose={closeModal}> 
+        <View style={styles.backdrop}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={{ width: "100%", alignItems: "center" }}
+          >
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>{isAddModal ? '고정 할 일 추가' : '고정 할 일 편집'}</Text>
+              
+              <Text style={styles.label}>이름</Text>
+              <TextInput
+                value={editPurpose}
+                onChangeText={setEditPurpose}
+                placeholder="예: 수면, 업무…"
+                placeholderTextColor={C.textDim}
+                style={styles.input}
+                returnKeyType="done"
               />
-            )}
 
-            {/* 종료시간 선택 */}
-            <Text style={[styles.label, { marginTop: 12 }]}>종료</Text>
-            <Pressable
-              style={styles.input} //input 스타일
-              onPress={() => { //클릭 시 실행
-                setShowAddEndPicker(true); //종료시간 피커 열고
-                setShowAddStartPicker(false); //시작시간 피커 닫음
-              }}
-              android_ripple={{ color: "transparent" }}
-            >
-              <View style={styles.rowBetween}>
-                <Text style={styles.inputText}>{fmtTime(addEnd)}</Text>
-                <Ionicons name="time-outline" size={18} color="#9ca3af" />
+              <Text style={[styles.label, { marginTop: 12 }]}>시간</Text>
+              <View style={styles.timeRow}>
+                <TouchableOpacity style={styles.timeBtn} onPress={() => setShowPicker("start")}>
+                  <Text style={styles.timeBtnText}>시작 {toHHMM(fromDateToMinutes(startTime))}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.timeBtn} onPress={() => setShowPicker("end")}>
+                  <Text style={styles.timeBtnText}>종료 {toHHMM(fromDateToMinutes(endTime))}</Text>
+                </TouchableOpacity>
               </View>
-            </Pressable>
-            {/*시간 선택 피커*/}
-            {showAddEndPicker && (
-              <DateTimePicker
-                value={addEnd} 
-                mode="time"
-                is24Hour
-                display={Platform.select({ ios: "spinner", android: "default" })}
-                onChange={(_, d) => {
-                  if (d) setAddEnd(d);
-                  if (Platform.OS === "android") setShowAddEndPicker(false);
-                }}
-              />
-            )}
 
-            {/* 요일 선택 */}
-            <Text style={[styles.label, { marginTop: 12 }]}>요일</Text>
-            <View style={styles.chips}>
-              {DAY_LABELS.map((d, i) => { //월화수목금토일 순회
-                const on = addDays[i]; //각 요일 활성상태, true면 선택된거
-                return (
-                  <Chip
-                    key={d} //각 요일 고유 식별자
-                    label={d} //칩에 표시될 텍스트
-                    active={on} //칩의 현재 선택 여부 전달
-                    onPress={() => { //칩 선택 시 실행
-                      const next = [...addDays]; //기존 addDAYS 복사
-                      next[i] = !next[i]; //눌린 요일 선택상태 강조
-                      setAddDays(next); //새 상태로 업데이트
+              {showPicker && (
+                <View style={{ marginTop: 8 }}>
+                  <DateTimePicker
+                    value={showPicker === "start" ? startTime : endTime}
+                    mode="time"
+                    display={Platform.OS === "ios" ? "spinner" : "default"}
+                    is24Hour={false}
+                    onChange={(e: DateTimePickerEvent, d?: Date) => {
+                      if (e.type === "dismissed") {
+                        setShowPicker(null);
+                        return;
+                      }
+                      if (d) {
+                        if (showPicker === "start") setStartTime(d);
+                        else setEndTime(d);
+                        if (Platform.OS !== "ios") setShowPicker(null);
+                      }
                     }}
                   />
-                );
-              })}
-            </View>
+                </View>
+              )}
 
-            {/* 취소/확인ㅂ ㅓ튼 */}
-            <View style={styles.footer}>
-              <Pressable style={[styles.btn, styles.btnGhost]} onPress={() => closeAddModal(true)} android_ripple={{ color: "transparent" }}>
-                <Text style={styles.btnGhostText}>취소</Text>
-              </Pressable>
-              <Pressable style={[styles.btn, styles.btnPrimary]} onPress={confirmAddWithoutSaving} android_ripple={{ color: "transparent" }}>
-                <Text style={styles.btnPrimaryText}>확인</Text>
-              </Pressable>
-            </View>
-          </AddModal>
-        ) : null}
-      </ScrollView>
-    </View>
-  );
+              <View style={styles.footerRow}>
+                <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={closeModal}>
+                  <Text style={styles.btnGhostText}>취소</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={saveChanges}>
+                  <Text style={styles.btnPrimaryText}>저장</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+    </View>
+  );
 }
 
-// 모달 컴포넌트들
-function BaseModal({ title, onClose, onPrimary, children,}: //제목, 닫기 함수, 확인버튼 함수, 동적 콘텐츠
-  React.PropsWithChildren<{ title: string; onClose: () => void; onPrimary: () => void;
-}>) {
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose} //항상 true로, 배경 투명하게, 페이드 잇/아웃 애니메이션, 안드로이드 뒤로가기 버튼
-      statusBarTranslucent presentationStyle="overFullScreen"> 
-      {/*반투명 배경*/}
-      <View style={styles.backdrop}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ width: "100%", alignItems: "center" }}>
-          <View style={styles.modalCard}>
-            {/*헤더*/}
-            <View style={styles.modalHeader}>
-              {/*모달 제목(예: 수면시간)*/}
-              <Text style={styles.modalTitle}>{title}</Text>
-              <Pressable onPress={onClose} style={styles.headerXbtn} android_ripple={{ color: "transparent" }}>
-                <Ionicons name="close" size={20} color="#e5e7eb" />
-              </Pressable>
-            </View>
-            {/*본문*/}
-            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
-              {children}
-            </ScrollView>
-            {/*푸터 영역(하단 취소/확인버튼)*/}
-            <View style={styles.footer}>
-              <Pressable style={[styles.btn, styles.btnGhost]} onPress={onClose} android_ripple={{ color: "transparent" }}>
-                <Text style={styles.btnGhostText}>닫기</Text>
-              </Pressable>
-              <Pressable style={[styles.btn, styles.btnPrimary]} onPress={onPrimary} android_ripple={{ color: "transparent" }}>
-                <Text style={styles.btnPrimaryText}>확인</Text>
-              </Pressable>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  );
-}
-
-//위 모달 컴포넌트와 동일, 하단 푸터영역 없는 간결한 버전
-function AddModal({
-  title,
-  onClose,
-  children,
-}: React.PropsWithChildren<{ title: string; onClose: () => void }>) {
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}
-      statusBarTranslucent presentationStyle="overFullScreen">
-      <View style={styles.backdrop}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ width: "100%", alignItems: "center" }}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{title}</Text>
-              <Pressable onPress={onClose} style={styles.headerXbtn} android_ripple={{ color: "transparent" }}>
-                <Ionicons name="close" size={20} color="#e5e7eb" />
-              </Pressable>
-            </View>
-
-            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
-              {children}
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  );
-}
-
-//그외 보조 컴포넌트
-function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) { //요일 선택 칩, 선택여부 및 클릭시 함수
-  return (
-    <Pressable
-      onPress={onPress} //칩 클릭 시 상위 컴포넌트에서 전달된 함수들 실행
-      focusable={false} // 안드로이드 포커스 테두리 방지
-      android_ripple={{ color: "transparent" }} // 잔상 제거
-      style={({ pressed }) => [ //스타일은 선택과 비선택 상태에 따라 다르게 처리
-        styles.chip,
-        active && styles.chipActive,
-        pressed && Platform.OS === "ios" ? { opacity: 0.8 } : null,
-      ]}
-      accessibilityRole="button"
-    >
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-//기타 스타일들
 const styles = StyleSheet.create({
-  scrollInner: { /* 스크롤뷰 내부 내용이 화면 아래까지 가도록 조절용으로 사용중 */ },
-  title: { color: "#E5E7EB", fontSize: 28, fontWeight: "800", marginTop: 24, marginBottom: 24 },
-
-  card: { backgroundColor: "#0F172A", borderRadius: 18, padding: 18, borderColor: "#111827", borderWidth: 1 },
-
-  menuBtn: {
-    paddingVertical: 12,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
+  container: { flex: 1, backgroundColor: C.bg },
+  safeTop: { backgroundColor: C.bg },
+  header: {
+    height: 56,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTitle: { fontSize: 16, fontWeight: "700", color: C.text },
+  daySelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+  },
+  dayButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 99,
+  },
+  dayButtonSelected: {
+    backgroundColor: C.primary,
+  },
+  dayButtonText: {
+    color: C.textDim,
+    fontWeight: '600'
+  },
+  dayButtonTextSelected: {
+    color: C.bg,
+  },
+  timelineRow: { flexDirection: "row" },
+  leftRail: {
+    width: LABEL_GUTTER,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: C.border,
+  },
+  hourRow: { paddingLeft: 8, justifyContent: "flex-start", alignItems: 'flex-end', paddingRight: 8 },
+  hourLabel: { fontSize: 12, color: C.textDim, marginTop: -8},
+  hourLine: {
+    position: "absolute",
+    left: LABEL_GUTTER - 10, right: 0, top: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: C.border,
+  },
+  canvas: { flex: 1, paddingRight: 16, paddingLeft: 8, position: "relative" },
+  gridLine: {
+    position: "absolute",
+    left: 0, right: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#1e293b",
+  },
+  block: {
+    position: "absolute",
     borderWidth: 1,
-    borderColor: "#374151",
-    backgroundColor: "#0B1220",
-  },
-  menuBtnText: { color: "#E5E7EB", fontSize: 15, fontWeight: "700" },
-
-  divider: { height: 1, backgroundColor: "#111827", marginVertical: 14, opacity: 0.7 },
-  stack: { gap: 12 },
-
-  primaryBtn: { backgroundColor: "#3B82F6", paddingVertical: 14, borderRadius: 14, alignItems: "center" },
-  primaryBtnText: { color: "white", fontWeight: "700", fontSize: 16 },
-  subText: { color: "#DBEAFE", marginTop: 4, fontSize: 12 },
-
-  shadow: {
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 6 },
-    ...Platform.select({ android: { elevation: 4 } }),
-  },
-
-  // 모달 공통
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", padding: 16 },
-  modalCard: { width: "100%", maxWidth: 520, backgroundColor: "#141414", borderColor: "#232323", borderWidth: 2, borderRadius: 16, overflow: "hidden" },
-  modalHeader: { marginBottom: 8, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 14 },
-  modalTitle: { color: "#e5e7eb", fontSize: 18, fontWeight: "700", flex: 1 },
-  headerXbtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
-
-  // 입력/칩
-  label: { color: "#cbd5e1", fontSize: 13, marginTop: 12, marginBottom: 6 },
-  input: { backgroundColor: "#0f0f0f", borderWidth: 1, borderColor: "#2a2a2a", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12 },
-  inputText: { color: "#e5e7eb", fontSize: 16, fontWeight: "700" },
-  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 2 },
-  chip: { paddingHorizontal: 10, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: "#2a2a2a", backgroundColor: "#0f0f0f" }, // ✔ 오타 수정
-  chipActive: { borderColor: "#3b82f6", backgroundColor: "#1f2937" },
-  chipText: { color: "#9ca3af", fontWeight: "600" },
-  chipTextActive: { color: "#e5e7eb" },
-
-  // 리스트 카드
-  blockCard: { borderWidth: 1, borderColor: "#2a2a2a", borderRadius: 12, padding: 12, backgroundColor: "#0f0f0f" },
-  blockTime: { color: "#e5e7eb", fontWeight: "700", marginLeft: 6 },
-  blockDays: { color: "#9ca3af", marginTop: 4 },
-
-  emptyCard: { borderWidth: 1, borderColor: "#2a2a2a", borderRadius: 12, padding: 16, alignItems: "center", backgroundColor: "#0f0f0f" },
-  emptyText: { color: "#9ca3af" },
-
-  // + 버튼
-  plusBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#3b82f6", alignItems: "center", justifyContent: "center" },
-
-  // 하단 요일 필터
-  filterRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 2 },
-
-  // 공통 footer
-  footer: { flexDirection: "row", gap: 12, paddingHorizontal: 16, paddingBottom: 16, marginTop: 2 },
-  btn: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: "center", justifyContent: "center" },
-  btnGhost: { borderWidth: 1, borderColor: "#374151", backgroundColor: "#0f0f0f" },
-  btnGhostText: { color: "#cbd5e1", fontWeight: "700" },
-  btnPrimary: { backgroundColor: "#3b82f6" },
-  btnPrimaryText: { color: "#0b1220", fontWeight: "800" },
+    borderColor: 'rgba(0,0,0,0.1)',
+    paddingRight: 4,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  blockTitle: { fontSize: 13, fontWeight: "700", color: "#0B1220" },
+  blockTime: { fontSize: 12, color: "#0B1220", opacity: 0.9, marginTop: 2 },
+  fab: {
+    position: "absolute",
+    right: 16,
+    bottom: 22,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: C.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+  },
+  fabText: { color: "#0B1220", fontSize: 26, fontWeight: "800", marginTop: -2 },
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end"},
+  modalCard: { width: "100%", backgroundColor: C.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, borderColor: C.border, borderWidth: 1, padding: 16 },
+  modalTitle: { color: C.text, fontSize: 18, fontWeight: "800", marginBottom: 16 },
+  label: { color: C.textDim, fontSize: 12, marginBottom: 6 },
+  input: {
+    backgroundColor: "#0B1220",
+    borderColor: C.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    color: C.text,
+  },
+  timeRow: { flexDirection: "row", gap: 8 },
+  timeBtn: {
+    flex: 1,
+    backgroundColor: "#0B1220",
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  timeBtnText: { color: C.text, fontWeight: "700" },
+  footerRow: { flexDirection: "row", gap: 10, marginTop: 16 },
+  btn: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  btnGhost: { borderWidth: 1, borderColor: C.border, backgroundColor: "#0B1220" },
+  btnGhostText: { color: C.text },
+  btnPrimary: { backgroundColor: C.primary },
+  btnPrimaryText: { color: "#0B1220", fontWeight: "800" },
 });
+
