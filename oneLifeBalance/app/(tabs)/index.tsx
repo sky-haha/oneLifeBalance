@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Dimensions, TouchableOpacity, PanResponder, Mod
 import { useRouter } from "expo-router";
 import { Svg, Path, Circle } from "react-native-svg";
 import { Calendar } from "react-native-calendars";
+import { Ionicons } from "@expo/vector-icons";
 
 // 기기의 화면 너비를 가져옴
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -97,6 +98,8 @@ const mockByDate: Record<string, Block[]> = (() => {
       { id: makeId(), start: 480, end: 720, color: "#60A5FA", label: "업무" },
       { id: makeId(), start: 780, end: 1020, color: "#34D399", label: "집중" },
       { id: makeId(), start: 540, end: 660, color: "#f472b6", label: "회의" },
+      { id: makeId(), start: 600, end: 820, color: "#f472b6", label: "기타" }
+
     ],
     [yesterday]: [{ id: makeId(), start: 540, end: 1020, color: "#F59E0B", label: "과제" }],
     [tomorrow]: [{ id: makeId(), start: 600, end: 900, color: "#F472B6", label: "회의" }],
@@ -124,6 +127,12 @@ export default function NewIndex() {
   const [selectedDate, setSelectedDate] = useState<string>(today);
   // 달력 모달의 표시 여부를 관리하는 상태
   const [calendarOpen, setCalendarOpen] = useState(false);
+
+  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
+
+  const toggleCheck = (id: string) => {
+    setCheckedItems(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   // 선택된 날짜에 해당하는 일정 목록을 가져옴
   const currentBlocks = useMemo(() => mockByDate[selectedDate] || [], [selectedDate]);
@@ -261,11 +270,32 @@ export default function NewIndex() {
         <Text style={styles.chartHint}>차트를 탭하면 할일 목록으로 이동합니다</Text>
       </View>
 
-      {/* 하단 스크롤 영역 */}
+      {/* 하단 할 일 목록 영역 */}
       <ScrollView contentContainerStyle={styles.cardsArea}>
-        <View style={styles.placeholderCard}>
-          <Text style={styles.placeholderText}>미정 영역</Text>
-        </View>
+        {currentBlocks.filter(b => b.label !== "빈 시간").length > 0 ? (
+          currentBlocks.filter(b => b.label !== "빈 시간").map((block) => {
+            const isChecked = !!checkedItems[block.id];
+            return (
+              <View key={block.id} style={styles.todoItem}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                  <View style={[styles.colorDot, { backgroundColor: block.color }]} />
+                  <Text style={[styles.todoText, isChecked && styles.todoTextChecked]}>{block.label}</Text>
+                </View>
+                <TouchableOpacity onPress={() => toggleCheck(block.id)} style={styles.checkbox}>
+                  {isChecked ? (
+                    <Ionicons name="checkmark-circle" size={24} color="#3B82F6" />
+                  ) : (
+                    <Ionicons name="ellipse-outline" size={24} color="#9CA3AF" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            );
+          })
+        ) : (
+          <View style={styles.placeholderCard}>
+            <Text style={styles.placeholderText}>오늘의 할 일이 없습니다.</Text>
+          </View>
+        )}
       </ScrollView>
 
       {/* 달력 모달 */}
@@ -339,5 +369,32 @@ const styles = StyleSheet.create({
     padding: 12,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
+  },
+  todoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  colorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 12,
+  },
+  todoText: {
+    fontSize: 16,
+    color: '#111827',
+  },
+  todoTextChecked: {
+    textDecorationLine: 'line-through',
+    color: '#9CA3AF',
+  },
+  checkbox: {
+    marginLeft: 16,
   },
 });

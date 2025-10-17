@@ -23,15 +23,15 @@ const C = {
 };
 
 // 시간표 UI 배치 관련
-const HOUR_HEIGHT = 44;           // 1시간(60분) 당 세로 높이(px)
+const HOUR_HEIGHT = 44;          // 1시간(60분) 당 세로 높이(px)
 const HOURS = Array.from({ length: 25 }, (_, i) => i); // 0~24시 라인
-const LABEL_GUTTER = 56;          //  좌측 시간 레일 폭
-const SNAP_MIN = 30;              //  드래그 이동 스냅 간격
-const FLICK_PROJECT_PX = 160;     //  빠른 드래그시 관성 보정 픽셀
-const DRAG_THRESHOLD_PX = 8;      //  드래그 시작 임계값
-const MIN_PROJECT_VY = 0.35;      //  플릭으로 간주할 최소 세로 속도
-const HANDLE_ZONE_PX = 24;        //  블록 상/하단 리사이즈 핸들 감지 영역
-const RESIZE_SNAP_MIN = 15;       //  리사이즈 스냅 간격
+const LABEL_GUTTER = 56;         //  좌측 시간 레일 폭
+const SNAP_MIN = 30;             //  드래그 이동 스냅 간격
+const FLICK_PROJECT_PX = 160;    //  빠른 드래그시 관성 보정 픽셀
+const DRAG_THRESHOLD_PX = 8;     //  드래그 시작 임계값
+const MIN_PROJECT_VY = 0.35;     //  플릭으로 간주할 최소 세로 속도
+const HANDLE_ZONE_PX = 24;       //  블록 상/하단 리사이즈 핸들 감지 영역
+const RESIZE_SNAP_MIN = 15;      //  리사이즈 스냅 간격
 
 //  유형/행동 카테고리 옵션
 const TYPES = ['휴식', '가족', '개인', '자기개발', '이동', '식사'];
@@ -70,6 +70,7 @@ type Block = {
   purpose?: string;
   type?: string;
   action?: string;
+  isGoal?: boolean; 
 };
 
 //  초기 표시용 데이터
@@ -83,9 +84,9 @@ const buildInitial = () => {
       { id: makeId(), start: 480, end: 720, color: "#60A5FA", purpose: "업무", type: '업무', action: '노동' },
       { id: makeId(), start: 570, end: 660, color: "#F59E0B", purpose: "미팅", type: '업무', action: '노동' },
       { id: makeId(), start: 540, end: 600, color: "#F472B6", purpose: "회의", type: '업무', action: '노동' },
-      { id: makeId(), start: 780, end: 1020, color: "#34D399", purpose: "집중", type: '자기개발', action: '공부' },
+      { id: makeId(), start: 780, end: 1020, color: "#34D399", purpose: "운동", type: '자기개발', action: '운동', isGoal: true },
     ] as Block[],
-    [yesterday]: [{ id: makeId(), start: 540, end: 1020, color: "#F59E0B", purpose: "과제" }],
+    [yesterday]: [{ id: makeId(), start: 540, end: 1020, color: "#F59E0B", purpose: "과제", isGoal: true }],
     [tomorrow]: [{ id: makeId(), start: 600, end: 900, color: "#F472B6", purpose: "회의" }],
   } as Record<string, Block[]>;
 };
@@ -163,6 +164,34 @@ export default function PurposeScreen() {
   const closeModal = () => {
     setModalMode(null);
     setSelectedBlock(null);
+  };
+
+  // 할 일을 저장하거나 수정하는 함수
+  const handleSave = (newBlock: Block) => {
+    setByDate(prev => {
+      const currentDayBlocks = prev[selectedDate] || [];
+      const existingIndex = currentDayBlocks.findIndex(b => b.id === newBlock.id);
+      
+      let updatedBlocks;
+      if (existingIndex > -1) {
+        // 기존 블록 수정
+        updatedBlocks = [...currentDayBlocks];
+        updatedBlocks[existingIndex] = newBlock;
+      } else {
+        // 새 블록 추가
+        updatedBlocks = [...currentDayBlocks, newBlock];
+      }
+      
+      return { ...prev, [selectedDate]: updatedBlocks };
+    });
+  };
+
+  //  할 일을 삭제하는 함수
+  const handleDelete = (idToDelete: string) => {
+    setByDate(prev => ({
+      ...prev,
+      [selectedDate]: (prev[selectedDate] || []).filter(b => b.id !== idToDelete),
+    }));
   };
 
   //  스크롤락: 드래그/리사이즈 중에는 ScrollView 스크롤 비활성화
@@ -391,7 +420,12 @@ export default function PurposeScreen() {
                   {/* 기본 카드 내용 */}
                   {!isDragging && (
                     <View style={{ flex: 1, overflow: 'hidden', padding: 10 }}>
-                      <Text style={styles.blockTitle} numberOfLines={1}>{b.purpose ?? "할 일"}</Text>
+                       {/*  목표 아이콘과 제목을 함께 보여주기 위한 View */}
+                      <View style={styles.blockTitleRow}>
+                        {/*  isGoal이 true일 때 별 아이콘 표시 */}
+                        {b.isGoal && <Ionicons name="star" size={12} color="#0B1220" style={styles.blockIcon} />}
+                        <Text style={styles.blockTitle} numberOfLines={1}>{b.purpose ?? "할 일"}</Text>
+                      </View>
                       {(b.type || b.action) && (
                         <Text style={styles.blockSubTitle} numberOfLines={1}>
                           [{b.type}{b.action && ` / ${b.action}`}]
@@ -419,8 +453,8 @@ export default function PurposeScreen() {
           mode={modalMode!}
           initialData={selectedBlock}
           onClose={closeModal}
-          onSave={(newBlock) => { console.log('저장 (UI 전용)', newBlock) }}   //  실제 저장 대신 로그
-          onDelete={(id) => { console.log('삭제 (UI 전용)', id) }}            //  실제 삭제 대신 로그
+          onSave={handleSave} //  실제 저장 함수 연결
+          onDelete={handleDelete} //  실제 삭제 함수 연결
         />
       </Modal>
     </View>
@@ -439,6 +473,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
   const [purpose, setPurpose] = useState(initialData?.purpose || '');
   const [type, setType] = useState(initialData?.type || '개인');
   const [action, setAction] = useState(initialData?.action || '기타');
+  const [isGoal, setIsGoal] = useState(initialData?.isGoal || false); //  목표 할일 여부를 관리하는 상태
   const [startTime, setStartTime] = useState(() => toDateFromMinutes(initialData?.start || 540));
   const [endTime, setEndTime] = useState(() => toDateFromMinutes(initialData?.end || 600));
 
@@ -459,6 +494,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
       purpose,
       type,
       action,
+      isGoal, //  저장 시 목표 상태 전달
       start: fromDateToMinutes(startTime),
       end: fromDateToMinutes(endTime),
       color: initialData?.color || randomColor(),
@@ -498,9 +534,17 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
           <View style={styles.newModalHeader}>
             <Text style={styles.modalTitle}>{mode === 'add' ? '할 일 추가' : '할 일 편집'}</Text>
             {mode === 'edit' && (
-              <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
-                <Text style={styles.deleteButtonText}>삭제</Text>
-              </TouchableOpacity>
+               //  헤더 오른쪽 액션 버튼들을 묶는 컨테이너
+              <View style={styles.headerActions}>
+                {/*  목표 토글 버튼 */}
+                <TouchableOpacity onPress={() => setIsGoal(prev => !prev)} style={[styles.goalToggleButton, isGoal && styles.goalToggleButtonActive]}>
+                  <Text style={[styles.goalToggleButtonText, isGoal && styles.goalToggleButtonTextActive]}>목표</Text>
+                </TouchableOpacity>
+                {/* 기존 삭제 버튼 */}
+                <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
+                  <Text style={styles.deleteButtonText}>삭제</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
 
@@ -525,7 +569,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
           <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('행동 유형 선택', ACTIONS, setAction)}>
             <Text style={styles.pickerButtonText}>{action}</Text>
           </TouchableOpacity>
-
+          
           {/* 시간 선택 (시작/종료) */}
           <Text style={styles.label}>시간</Text>
           <View style={styles.timeRow}>
@@ -598,8 +642,6 @@ function formatHour(h: number) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   safeTop: { backgroundColor: C.bg },
-
-  // 헤더
   header: {
     height: 56,
     paddingHorizontal: 12,
@@ -612,8 +654,6 @@ const styles = StyleSheet.create({
   headerBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   headerBtnText: { fontSize: 24, color: C.text, fontWeight: 'bold' },
   headerTitle: { fontSize: 16, fontWeight: "700", color: C.text },
-
-  // 타임라인
   timelineRow: { flexDirection: "row" },
   leftRail: {
     width: LABEL_GUTTER,
@@ -628,8 +668,6 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: C.border,
   },
-
-  // 캔버스/그리드
   canvas: { flex: 1, paddingRight: 16, paddingLeft: 8, position: "relative" },
   gridLine: {
     position: "absolute",
@@ -637,19 +675,24 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: "#1e293b",
   },
-
-  // 블록 카드
   block: {
     position: "absolute",
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.1)',
     borderRadius: 10,
   },
-  blockTitle: { fontSize: 13, fontWeight: "700", color: "#0B1220" },
+  //  블록 제목과 아이콘을 가로로 배치하기 위한 스타일
+  blockTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  //  별 아이콘 오른쪽 여백
+  blockIcon: {
+    marginRight: 4,
+  },
+  blockTitle: { fontSize: 13, fontWeight: "700", color: "#0B1220", flexShrink: 1 },
   blockSubTitle: { fontSize: 11, fontWeight: "500", color: "#0B1220", opacity: 0.8, marginTop: 2 },
   blockTime: { fontSize: 12, color: "#0B1220", opacity: 0.9, marginTop: 2 },
-
-  // 드래그 중 오버레이
   movingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.18)",
@@ -666,8 +709,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
   },
-
-  // 버튼
   fab: {
     position: "absolute",
     right: 16,
@@ -681,16 +722,12 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   fabText: { color: "#0B1220", fontSize: 26, fontWeight: "800", marginTop: -2 },
-
-  // 리사이즈 핸들
   handleTop: {
     position: "absolute", top: 0, left: 0, right: 0, height: 28, marginTop: -8, justifyContent: "center", alignItems: "center", zIndex: 3,
   },
   handleBottom: {
     position: "absolute", bottom: 0, left: 0, right: 0, height: 28, marginBottom: -8, justifyContent: "center", alignItems: "center", zIndex: 3,
   },
-
-  // 모달
   backdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.6)",
@@ -722,6 +759,36 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "bold",
   },
+  //  헤더 오른쪽 버튼들을 묶는 컨테이너
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  //  목표 토글 버튼 스타일
+  goalToggleButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  //  목표 토글 활성화 시 스타일
+  goalToggleButtonActive: {
+    backgroundColor: C.primary,
+    borderColor: C.primary,
+  },
+  //  목표 토글 텍스트 스타일
+  goalToggleButtonText: {
+    color: C.textDim,
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  //  목표 토글 활성화 시 텍스트 스타일
+  goalToggleButtonTextActive: {
+    color: 'white',
+  },
   deleteButton: {
     backgroundColor: C.danger,
     paddingHorizontal: 12,
@@ -733,8 +800,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 14,
   },
-
-  // 폼
   label: {
     color: C.textDim,
     fontSize: 14,
@@ -774,7 +839,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   timeBtnText: { color: C.text, fontWeight: "600", fontSize: 16 },
-
   footerRow: { flexDirection: "row", gap: 12, marginTop: 24 },
   btn: {
     flex: 1,
@@ -786,7 +850,7 @@ const styles = StyleSheet.create({
   btnGhostText: { color: C.text, fontWeight: "700" },
   btnPrimary: { backgroundColor: C.primary },
   btnPrimaryText: { color: "#FFF", fontWeight: "bold" },
-
+  
   pickerBackdrop: {
     flex: 1,
     justifyContent: 'center',
