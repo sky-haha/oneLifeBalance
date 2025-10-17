@@ -1,107 +1,106 @@
-import React, { useMemo, useState } from "react";
-import { View, Text, StyleSheet, Dimensions, ScrollView,
-TouchableOpacity, Modal, KeyboardAvoidingView, Platform,
-TextInput, Animated, PanResponder} from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  View, Text, StyleSheet, Dimensions, ScrollView,
+  TouchableOpacity, Modal, KeyboardAvoidingView, Platform,
+  TextInput, Animated, PanResponder
+} from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { Ionicons } from "@expo/vector-icons";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-//색상팔레트들(이렇게하는방법이있다더라고요)
+// 색상 팔레트들
 const C = {
-  bg: "#0B1220",
-  card: "#0F172A",
-  border: "#1F2937",
-  text: "#E5E7EB",
-  textDim: "#9CA3AF",
-  primary: "#3B82F6",
+  bg: "#0B1220",
+  card: "#0F172A",
+  border: "#1F2937",
+  text: "#E5E7EB",
+  textDim: "#9CA3AF",
+  primary: "#3B82F6",
+  danger: "#EF4444",
 };
 
-// 시간 변환 유틸리티 함수들
+// 시간표 UI 배치 관련
+const HOUR_HEIGHT = 44;           // 1시간(60분) 당 세로 높이(px)
+const HOURS = Array.from({ length: 25 }, (_, i) => i); // 0~24시 라인
+const LABEL_GUTTER = 56;          //  좌측 시간 레일 폭
+const SNAP_MIN = 30;              //  드래그 이동 스냅 간격
+const FLICK_PROJECT_PX = 160;     //  빠른 드래그시 관성 보정 픽셀
+const DRAG_THRESHOLD_PX = 8;      //  드래그 시작 임계값
+const MIN_PROJECT_VY = 0.35;      //  플릭으로 간주할 최소 세로 속도
+const HANDLE_ZONE_PX = 24;        //  블록 상/하단 리사이즈 핸들 감지 영역
+const RESIZE_SNAP_MIN = 15;       //  리사이즈 스냅 간격
 
-//Date 객체를 YYYY-MM-DD 형식 문자열로 변환
+//  유형/행동 카테고리 옵션
+const TYPES = ['휴식', '가족', '개인', '자기개발', '이동', '식사'];
+const ACTIONS = ['수면', '노동', '수업', '운동', '오락', '기타'];
+
+//  날짜/시간 편의 함수 모음
 const fmt = (d: Date) => d.toISOString().split("T")[0];
-//YYYY-MM-DD에 일수를 더하거나 빼서 새 문자열 반환
 const addDays = (iso: string, delta: number) => {
-  const d = new Date(iso);
-  d.setDate(d.getDate() + delta);
-  return fmt(d);
+  const d = new Date(iso);
+  d.setDate(d.getDate() + delta);
+  return fmt(d);
 };
-//분 단위 숫자는 HH:MM형식 문자열로 반환
 const toHHMM = (m: number) => {
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 };
-//dATE객체를 00:00기준 총 경과 분으로 변환
 const fromDateToMinutes = (d: Date) => d.getHours() * 60 + d.getMinutes();
-//분 단위 숫자도 dATE객체로 변환(오늘날짜 기준 00:00부터 minute만큼 더함)
 const toDateFromMinutes = (minutes: number) => {
-  const base = new Date();
-  base.setHours(0, 0, 0, 0);
-  base.setMinutes(minutes);
-  return base;
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+  base.setMinutes(minutes);
+  return base;
 };
-// 일정 블록 랜덤으로 색상 넣음
 const randomColor = () => {
-  const colors = ["#60A5FA", "#34D399", "#F59E0B", "#F472B6", "#A78BFA", "#F87171"];
-  return colors[(Math.random() * colors.length) | 0];
+  const colors = ["#60A5FA", "#34D399", "#F59E0B", "#F472B6", "#A78BFA", "#F87171"];
+  return colors[(Math.random() * colors.length) | 0];
 };
 
-// 구조
-type Block = { id: string; //식별자
-  start: number; //시작시간
-  end: number;  //종료시간
-  color: string; //블록색상
-  purpose?: string }; //일정이름
+//  타임블록 구조
+type Block = {
+  id: string;
+  start: number;
+  end: number;
+  color: string;
+  purpose?: string;
+  type?: string;
+  action?: string;
+};
 
-// 표시용 일정목록, 나중에 파이어베이스 연동할부분
+//  초기 표시용 데이터
 const makeId = () => Math.random().toString(36).slice(2, 9);
 const buildInitial = () => {
-  const today = fmt(new Date());
-  const yesterday = addDays(today, -1);
-  const tomorrow = addDays(today, +1);
-  return {
-    [today]: [
-      { id: makeId(), start: 480, end: 720, color: "#60A5FA", purpose: "업무 (가장 김)" }, 
-      { id: makeId(), start: 570, end: 660, color: "#F59E0B", purpose: "미팅 (중간)" }, 
-      { id: makeId(), start: 540, end: 600, color: "#F472B6", purpose: "회의 (가장 짧음)" }, 
-      { id: makeId(), start: 780, end: 1020, color: "#34D399", purpose: "집중" },
-    ] as Block[],
-    [yesterday]: [{ id: makeId(), start: 540, end: 1020, color: "#F59E0B", purpose: "과제" }],
-    [tomorrow]: [{ id: makeId(), start: 600, end: 900, color: "#F472B6", purpose: "회의" }],
-  } as Record<string, Block[]>;
+  const today = fmt(new Date());
+  const yesterday = addDays(today, -1);
+  const tomorrow = addDays(today, +1);
+  return {
+    [today]: [
+      { id: makeId(), start: 480, end: 720, color: "#60A5FA", purpose: "업무", type: '업무', action: '노동' },
+      { id: makeId(), start: 570, end: 660, color: "#F59E0B", purpose: "미팅", type: '업무', action: '노동' },
+      { id: makeId(), start: 540, end: 600, color: "#F472B6", purpose: "회의", type: '업무', action: '노동' },
+      { id: makeId(), start: 780, end: 1020, color: "#34D399", purpose: "집중", type: '자기개발', action: '공부' },
+    ] as Block[],
+    [yesterday]: [{ id: makeId(), start: 540, end: 1020, color: "#F59E0B", purpose: "과제" }],
+    [tomorrow]: [{ id: makeId(), start: 600, end: 900, color: "#F472B6", purpose: "회의" }],
+  } as Record<string, Block[]>;
 };
 
-// 사각형 블록들 레이아웃 (추후변경예정)
-const HOUR_HEIGHT = 44; //테스트용 길게
-const HOURS = Array.from({ length: 25 }, (_, i) => i); //시간별 레이블 눈금
-const LABEL_GUTTER = 56; // 시간 레이블 및 블록시작점 여백
-const SNAP_MIN = 30; //블록 옮길때 시간단위 30분으로
-
-// 드래그, 클릭 관련 상수 값 변경
-const FLICK_PROJECT_PX = 160;   // 드래그 중 휙휙 넘길때도 인식하기 위한 이동거리, 이 값 이상으로 이동하면 휙 넘기는걸로 간주
-const DRAG_THRESHOLD_PX = 8;    // 드래그 시작으로 인정할 최소이동거리 
-// const DRAG_DELAY_MS = 80;       //인위적인 지연시간 제거
-const MIN_PROJECT_VY = 0.35;    // 이 속도 이상이면 블록들이 움직이도롱
-
-// 리사이즈 핸들 관련 설정
-const HANDLE_ZONE_PX = 24;       // 블록 내부 상/하단 리사이즈 시작 구역 높이(px)
-const RESIZE_SNAP_MIN = 15;      // 리사이즈 스냅 간격 일단 15분
-
-// purpose 메인화면
 export default function PurposeScreen() {
-  //Index에서 전달받은 날짜 파라미터, 전달값없으면 일단 기본값은 오늘로
-  const router = useRouter();
-  const { date } = useLocalSearchParams<{ date?: string }>();
-  const selectedDate = (typeof date === "string" && date) || fmt(new Date());
+  const router = useRouter();
+  const { date } = useLocalSearchParams<{ date?: string }>();
+  const selectedDate = (typeof date === "string" && date) || fmt(new Date());
 
-  //YYYY-MM-DD:Block[] 이런형식, 현재는 하드코딩 데이터 사용중
-  const [byDate, setByDate] = useState<Record<string, Block[]>>(buildInitial());
-  //현재 선택 날짜에 해당하는 일정배열만 추출, useMemo로 캐싱해 selectedDate나 byDate가 바뀔때만 재계산
-  const blocks = useMemo(() => byDate[selectedDate] || [], [byDate, selectedDate]);
+  //  날짜별 블록 상태와 현재 날짜의 블록
+  const [byDate, setByDate] = useState<Record<string, Block[]>>(buildInitial());
+  const blocks = useMemo(() => byDate[selectedDate] || [], [byDate, selectedDate]);
 
+  //  겹치는 블록을 가로 분할 배치
+  //  시작시각 기준 정렬 → DFS로 겹침 그룹 탐색 → 그룹 내 길이 오름차순 정렬 → 순서대로 컬럼폭 분배
   const blockLayouts = useMemo(() => {
     const sortedByTime = [...blocks].sort((a, b) => a.start - b.start);
     if (sortedByTime.length === 0) return new Map();
@@ -111,8 +110,9 @@ export default function PurposeScreen() {
 
     for (const block of sortedByTime) {
       if (processed.has(block.id)) continue;
-
       const group: Block[] = [];
+
+      //  겹치는 블록을 같은 그룹으로 묶음
       const findOverlapsRecursive = (b: Block) => {
         group.push(b);
         processed.add(b.id);
@@ -124,10 +124,12 @@ export default function PurposeScreen() {
         }
       };
       findOverlapsRecursive(block);
-      
-      const groupSortedByDuration = group.sort((a, b) => (a.end - a.start) - (b.end - b.start));
 
+      // 짧은 것부터 앞 컬럼 배치
+      const groupSortedByDuration = group.sort((a, b) => (a.end - a.start) - (b.end - b.start));
       const totalColumns = groupSortedByDuration.length;
+
+      //  각 블록의 top/height(분→px), left/width(가로 분할) 계산
       groupSortedByDuration.forEach((b, colIndex) => {
         layouts.set(b.id, {
           top: (b.start / 60) * HOUR_HEIGHT,
@@ -137,701 +139,683 @@ export default function PurposeScreen() {
         });
       });
     }
-
     return layouts;
   }, [blocks]);
 
+  //  상단 좌상단 백버튼
+  const goBack = () => {
+    if ((router as any).canGoBack?.()) router.back();
+    else router.replace("/(tabs)");
+  };
 
-  //뒤로가기버튼, ios기준 뒤로가기 작동 안하는 경우가 있어서 강제복귀처리 하나
-  const goBack = () => {
-    if ((router as any).canGoBack?.()) router.back();
-    else router.replace("/(tabs)");
-  };
+  //  모달: 추가/편집 모드 및 선택 블록
+  const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
+  const [selectedBlock, setSelectedBlock] = useState<Block | null>(null);
 
-  //할일 클릭시 뜨는 편집모달
-  //현재 수정중인 블록의 id, 없으면 null
-  const [editingId, setEditingId] = useState<string | null>(null);
-  //실제 수정중인 Block 객체를 찾아서 반환, editingID가 있을때만 블록 배열에서 해당ID를가진 일정 탐색
-  const editing = editingId ? blocks.find((b) => b.id === editingId) || null : null;
+  const openAddModal = () => {
+    setSelectedBlock(null);
+    setModalMode('add');
+  };
+  const openEditModal = (block: Block) => {
+    setSelectedBlock(block);
+    setModalMode('edit');
+  };
+  const closeModal = () => {
+    setModalMode(null);
+    setSelectedBlock(null);
+  };
 
-  //수정용 임시 상태들
-  //사용자가 편집중일때 입력창이나 피커에 표시될 값들: 할일 이름, 시작/종료시간, 시간피커(지금은 임시값)
-  const [editPurpose, setEditPurpose] = useState<string>("");
-  const [startTime, setStartTime] = useState<Date>(toDateFromMinutes(480));
-  const [endTime, setEndTime] = useState<Date>(toDateFromMinutes(540));
-  const [showPicker, setShowPicker] = useState<null | "start" | "end">(null);
+  //  스크롤락: 드래그/리사이즈 중에는 ScrollView 스크롤 비활성화
+  const [scrollLock, setScrollLock] = useState(false);
+  const dragY = useState(new Animated.Value(0))[0]; 
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragStartTop, setDragStartTop] = useState(0);
+  const [dragDurationMin, setDragDurationMin] = useState(0);
 
-  //편집모달 열기 관련
-  const openEdit = (b: Block) => {
-    //선택 블록 데이터를 불러옴
-    setEditingId(b.id); 
-    setEditPurpose(b.purpose ?? "");
-    setStartTime(toDateFromMinutes(b.start));
-    setEndTime(toDateFromMinutes(b.end));
-  };
-  //편집모달 닫기
-  const closeEdit = () => {
-    setEditingId(null);
-    setShowPicker(null);
-  };
-  //편집모달 저장
-  const saveEdit = () => {
-    if (!editing) return; //수정할거 없으면 그냥 종료
-    const s = fromDateToMinutes(startTime); //시각(Date)를 분단위 숫자로 변환
-    const e = fromDateToMinutes(endTime);
-    if (e <= s) return; //종료시각이 시작시각보다 앞서면 무시
+  //  px↔분 변환 + 스냅/클램프
+  const minutesFromTopPx = (topPx: number) => Math.round((topPx / HOUR_HEIGHT) * 60);
+  const snapMinutes = (min: number) => Math.round(min / SNAP_MIN) * SNAP_MIN;
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-    //bydate 상태 업뎃, selecteddate에 해당되는 블록 배열중 edting.id와일치하는거만 갱신, (이부분은 테스트용 로컬상태 업데이트)
-    setByDate((prev) => ({
-      ...prev,
-      [selectedDate]: (prev[selectedDate] || []).map((b) =>
-        b.id === editing.id ? { ...b, start: s, end: e, purpose: editPurpose } : b //수정된 내용 반영
-      ),
-    }));
-    closeEdit(); //닫기
-  };
+  const contentHeight = HOUR_HEIGHT * 24; //  24시간 높이
 
-  // 드래그,드롭 유틸들
+  //  리사이즈 상태
+  const [resizingId, setResizingId] = useState<null | {
+    id: string;
+    edge: "top" | "bottom";
+    origStart: number;
+    origEnd: number;
+  }>(null);
 
-  const [scrollLock, setScrollLock] = useState(false); // 드래그 중 스크롤 잠금
-  const dragY = useState(new Animated.Value(0))[0]; //드래그중인 블록 Y좌표 오프셋
-  const [draggingId, setDraggingId] = useState<string | null>(null); //드래그중인 블록의 ID
-  const [dragStartTop, setDragStartTop] = useState(0); // 드래그 시작지점의 top 위치
-  const [dragDurationMin, setDragDurationMin] = useState(0); // 드래그중인 블록의 길이(시간)
+  //  리사이즈 핸들 감지 유틸
+  const inTopHandleZone = (y: number) => y <= HANDLE_ZONE_PX;
+  const inBottomHandleZone = (y: number, hPx: number) => y >= hPx - HANDLE_ZONE_PX;
+  const snapResize = (min: number) => Math.round(min / RESIZE_SNAP_MIN) * RESIZE_SNAP_MIN;
 
-  const minutesFromTopPx = (topPx: number) => Math.round((topPx / HOUR_HEIGHT) * 60); //화면상 위치를분단위로 변환
-  const snapMinutes = (min: number) => Math.round(min / SNAP_MIN) * SNAP_MIN; // 분 단위를 SNAP_MIN(지금은 30분단위) 등으로 스냅 맞추기
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v)); // 특정값을 범위내로 강제, 화면 벗어나거나 음수로 가는거 방지
-  const hasOverlap = (start: number, end: number, selfId: string) => false;
+  return (
+    <View style={styles.container}>
+      {/* 상단 헤더 */}
+      <SafeAreaView edges={["top"]} style={styles.safeTop}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={goBack} style={styles.headerBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+            <Text style={styles.headerBtnText}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{selectedDate}</Text>
+          <View style={styles.headerBtn} />
+        </View>
+      </SafeAreaView>
 
-  const contentHeight = HOUR_HEIGHT * 24;
+      {/* 메인 타임라인 스크롤 영역 */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ height: contentHeight }}
+        scrollEnabled={!scrollLock}
+        contentInsetAdjustmentBehavior="never"
+        decelerationRate="fast"
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.timelineRow}>
+          {/* 좌측 시간 레일 */}
+          <View style={[styles.leftRail, { height: contentHeight }]}>
+            {HOURS.map((h) => (
+              <View key={h} style={[styles.hourRow, { height: HOUR_HEIGHT }]}>
+                {h < 24 && <Text style={styles.hourLabel}>{formatHour(h)}</Text>}
+                <View style={styles.hourLine} />
+              </View>
+            ))}
+          </View>
 
-  // 리사이즈 중인지 추적
-  const [resizingId, setResizingId] = useState<null | {
-    id: string;
-    edge: "top" | "bottom";
-    origStart: number;
-    origEnd: number;
-  }>(null);
+          {/* 우측 캔버스(블록) */}
+          <View style={[styles.canvas, { height: contentHeight }]}>
+            {/* 시간선(가로 그리드) */}
+            {HOURS.map((h) => (
+              <View key={`grid-${h}`} style={[styles.gridLine, { top: h * HOUR_HEIGHT }]} />
+            ))}
 
-  // 핸들 영역 판별(블록 내부 좌표계 locationY 기준)
-  const inTopHandleZone = (y: number) => y <= HANDLE_ZONE_PX;
-  const inBottomHandleZone = (y: number, hPx: number) => y >= hPx - HANDLE_ZONE_PX;
-
-  // 리사이즈 스냅
-  const snapResize = (min: number) => Math.round(min / RESIZE_SNAP_MIN) * RESIZE_SNAP_MIN;
-
-  // 추가버튼 관련 모달
-  //true면 모달 열림, false면 모달 닫힘
-  const [addOpen, setAddOpen] = useState(false);
-
-  //새 일정 제목
-  const [addPurpose, setAddPurpose] = useState("");
-  // 새일정 색상(랜덤)
-  const [addColor, setAddColor] = useState(randomColor());
-  //시작/종료시간(기본값 0900/1000)
-  const [addStart, setAddStart] = useState<Date>(toDateFromMinutes(540)); 
-  const [addEnd, setAddEnd] = useState<Date>(toDateFromMinutes(600));    
-  //시간피커
-  const [addPicker, setAddPicker] = useState<null | "start" | "end">(null);
-
-  //새일정 추가 누르면 모달 열림
-  const openAdd = () => {
-    setAddPurpose("");
-    setAddColor(randomColor());
-    setAddStart(toDateFromMinutes(540));
-    setAddEnd(toDateFromMinutes(600));
-    setAddPicker(null);
-    setAddOpen(true);
-  };
-  //닫힘
-  const closeAdd = () => {
-    setAddOpen(false);
-    setAddPicker(null);
-  };
-  // 이 코드는 로컬저장도 안되는 UI테스트용
-
-  return (
-    <View style={styles.container}>
-      {/* 상단 헤더 */}
-      <SafeAreaView edges={["top"]} style={styles.safeTop}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            onPress={goBack} //뒤로가기 핸들러
-            style={styles.headerBtn}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} //터치판정영역
-          >
-            {/*현재 선택된 날짜 표시*/}
-            <Text style={styles.headerBtnText}>←</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{selectedDate}</Text>
-          <View style={styles.headerBtn} />
-        </View>
-      </SafeAreaView>
-
-      {/* 타임블록 스크롤 구간*/}
-      <ScrollView
-        style={{ flex: 1 }} //남은공간 모두 차지
-        contentContainerStyle={{ height: contentHeight }} //내부 전체 높이
-        scrollEnabled={!scrollLock} //드래그중엔 스크롤 잠금
-        contentInsetAdjustmentBehavior="never"
-        decelerationRate="fast"
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.timelineRow}>
-
-          {/* 왼쪽 시간표시 레일구간 */}
-          <View style={[styles.leftRail, { height: contentHeight }]}>
-            {HOURS.map((h) => (
-              <View key={h} style={[styles.hourRow, { height: HOUR_HEIGHT }]}>
-                {/*0시~23시까지 표시*/}
-                {h < 24 && <Text style={styles.hourLabel}>{formatHour(h)}</Text>}
-                <View style={styles.hourLine} /> {/*구분선*/}
-              </View>
-            ))}
-          </View>
-
-          {/* 오른쪽, 블럭들 놓이는 곳, 시간단위 배경선 부분(이부분은 아직 저도 잘 모르겠습니다) */}
-          {/*top, height: 일정위치 계산, px단위 변환*/}
-          {/*PanResponder.create: 터치인식기 등록, 터치와 드래그 구분*/}
-          {/*onPanResponderGrant: 드래그 시작, 위치 시간 기록*/}
-          {/*onPanResponderMonve: 드래그중, 실시간 이동*/}
-          {/*onPanResponderRelase: 드래그종료, 새위치 계산및 겹칩 확인*/}
-          {/*hasOverlap(): 겹침방지*/}
-          <View style={[styles.canvas, { height: contentHeight }]}>
-            {HOURS.map((h) => (
-              <View key={`grid-${h}`} style={[styles.gridLine, { top: h * HOUR_HEIGHT }]} />
-            ))}
-            {/* 드래그로 이동시키는 부분 */}
-            {blocks.map((b) => {
+            {/* 실제 블록 렌더/드래그/리사이즈 */}
+            {blocks.map((b) => {
               const layout = blockLayouts.get(b.id);
               if (!layout) return null;
-              
+
               const { top, height } = layout;
 
-              // PanResponder (탭 우선)
-              const responder = PanResponder.create({
-                //초기 터치 인식 관련
-
-                // 핸들 영역에서 시작되면 이동 제스처 시작 금지
-                onStartShouldSetPanResponder: (e) => {
-                  if (resizingId) return false; // 리사이즈 중이면 이동 금지
-                  const y = (e.nativeEvent as any).locationY ?? 0;
-                  if (inTopHandleZone(y) || inBottomHandleZone(y, height)) return false; // 핸들영역이면 이동X
-                  return true; // 탭을 위해 일단 true로 열어둠
-                },
-
-                // 드래그 시작 조건 단순화 및 즉각 반응
-                onMoveShouldSetPanResponder: (e, g) => {
-                  if (resizingId) return false;
-                  const y = (e.nativeEvent as any).locationY ?? 0;
-                  if (inTopHandleZone(y) || inBottomHandleZone(y, height)) return false; 
-                    // 지연시간 없이, y축으로 일정 거리 이상 움직이면 즉시 드래그 시작
-                  return Math.abs(g.dy) > DRAG_THRESHOLD_PX;
-                },
-
-                //드래그 시작 시
-                onPanResponderGrant: () => {
-                  setDraggingId(b.id);
-                  setDragStartTop(top);
-                  setDragDurationMin(b.end - b.start);
-                  dragY.setValue(0);
-                  setScrollLock(true);
-                },
-                //드래그 중
-                onPanResponderMove: Animated.event([null, { dy: dragY }], { useNativeDriver: false }),
-
-                //드래그 종료 시
-                onPanResponderRelease: (_e, g) => {
-                  // 탭/클릭과 드래그를 구분하는 로직 추가
+              //  블록 이동용 PanResponder
+              const responder = PanResponder.create({
+                onStartShouldSetPanResponder: (e) => {
+                  if (resizingId) return false;
+                  const y = (e.nativeEvent as any).locationY ?? 0;
+                  //  상/하단 핸들에서는 이동 대신 리사이즈가 우선되어야 하므로 false
+                  if (inTopHandleZone(y) || inBottomHandleZone(y, height)) return false;
+                  return true;
+                },
+                onMoveShouldSetPanResponder: (e, g) => {
+                  if (resizingId) return false;
+                  const y = (e.nativeEvent as any).locationY ?? 0;
+                  if (inTopHandleZone(y) || inBottomHandleZone(y, height)) return false;
+                  return Math.abs(g.dy) > DRAG_THRESHOLD_PX;
+                },
+                onPanResponderGrant: () => {
+                  setDraggingId(b.id);
+                  setDragStartTop(top);
+                  setDragDurationMin(b.end - b.start);
+                  dragY.setValue(0);
+                  setScrollLock(true);
+                },
+                onPanResponderMove: Animated.event([null, { dy: dragY }], { useNativeDriver: false }),
+                onPanResponderRelease: (_e, g) => {
                   const isClick = Math.abs(g.dx) < 5 && Math.abs(g.dy) < 5;
                   if (isClick) {
-                    openEdit(b);
+                    //  클릭으로 판단되면 편집 모달 열기
+                    openEditModal(b);
                     setDraggingId(null);
                     setScrollLock(false);
                     return;
                   }
+                  //  플릭 보정: 속도가 빠르면 추가 이동 반영
+                  const projectedDy = Math.abs(g.vy) >= MIN_PROJECT_VY ? g.dy + g.vy * FLICK_PROJECT_PX : g.dy;
+                  const newTopPx = dragStartTop + projectedDy;
+                  let newStartMin = minutesFromTopPx(newTopPx);
+                  newStartMin = snapMinutes(newStartMin);
+                  newStartMin = clamp(newStartMin, 0, 1440 - dragDurationMin);
+                  const newEndMin = newStartMin + dragDurationMin;
 
-                  const projectedDy =
-                    Math.abs(g.vy) >= MIN_PROJECT_VY ? g.dy + g.vy * FLICK_PROJECT_PX : g.dy;
-
-                  const newTopPx = dragStartTop + projectedDy;
-
-                  let newStartMin = minutesFromTopPx(newTopPx);
-                  newStartMin = snapMinutes(newStartMin);
-                  newStartMin = clamp(newStartMin, 0, 1440 - dragDurationMin);
-                  const newEndMin = newStartMin + dragDurationMin;
-                  
-                  setByDate((prev) => ({
-                    ...prev,
-                    [selectedDate]: (prev[selectedDate] || []).map((x) =>
-                      x.id === b.id ? { ...x, start: newStartMin, end: newEndMin } : x
-                    ),
-                  }));
-
-                  Animated.spring(dragY, { toValue: 0, useNativeDriver: false }).start(() => {
-                    setDraggingId(null);
-                    setScrollLock(false);
-                  });
-                },
-                //드래그중 다른 제스처 끼어들지 못하게 방지
-                onPanResponderTerminationRequest: () => false,
-                //드래그가 이상하게 종료됐을 때 복귀
-                onPanResponderTerminate: () => {
-                  Animated.spring(dragY, { toValue: 0, useNativeDriver: false }).start(() => {
-                    setDraggingId(null);
-                    setScrollLock(false);
-                  });
-                },
-              });
-
-              // 상단 길이조절 핸들 PanResponder
-              const handleTopDrag = PanResponder.create({
-              onStartShouldSetPanResponder: () => true,
-              onPanResponderGrant: () => {
-                setResizingId({ id: b.id, edge: "top", origStart: b.start, origEnd: b.end });
-                setScrollLock(true);
-              },
-              onPanResponderRelease: (_e, g) => {
-                const deltaMinRaw = minutesFromTopPx(g.dy);
-                const deltaMin = snapResize(deltaMinRaw);
-                let newStart = clamp(b.start + deltaMin, 0, b.end - RESIZE_SNAP_MIN);
-                setByDate((prev) => ({
+                  //  실제 상태 반영
+                  setByDate((prev) => ({
                     ...prev,
                     [selectedDate]: (prev[selectedDate] || []).map((x) =>
-                        x.id === b.id ? { ...x, start: newStart } : x
+                      x.id === b.id ? { ...x, start: newStartMin, end: newEndMin } : x
                     ),
-                }));
-                setResizingId(null);
-                setScrollLock(false);
-              },
-              onPanResponderTerminate: () => {
-                setResizingId(null);
-                setScrollLock(false);
-              },
-            });
+                  }));
 
-              // 하단 길이조절 핸들 PanResponder
-              const handleBottomDrag = PanResponder.create({
-              onStartShouldSetPanResponder: () => true,
-              onPanResponderGrant: () => {
-                setResizingId({ id: b.id, edge: "bottom", origStart: b.start, origEnd: b.end });
-                setScrollLock(true);
-              },
-              onPanResponderRelease: (_e, g) => {
-                const deltaMinRaw = minutesFromTopPx(g.dy);
-                const deltaMin = snapResize(deltaMinRaw);
-                let newEnd = clamp(b.end + deltaMin, b.start + RESIZE_SNAP_MIN, 1440);
-                setByDate((prev) => ({
+                  //  드래그 보정값 리셋 & 스크롤 언락
+                  Animated.spring(dragY, { toValue: 0, useNativeDriver: false }).start(() => {
+                    setDraggingId(null);
+                    setScrollLock(false);
+                  });
+                },
+                onPanResponderTerminationRequest: () => false, //  중단 거부
+                onPanResponderTerminate: () => {
+                  Animated.spring(dragY, { toValue: 0, useNativeDriver: false }).start(() => {
+                    setDraggingId(null);
+                    setScrollLock(false);
+                  });
+                },
+              });
+
+              //  상단 리사이즈 핸들
+              const handleTopDrag = PanResponder.create({
+                onStartShouldSetPanResponder: () => true,
+                onPanResponderGrant: () => {
+                  setResizingId({ id: b.id, edge: "top", origStart: b.start, origEnd: b.end });
+                  setScrollLock(true);
+                },
+                onPanResponderRelease: (_e, g) => {
+                  const deltaMinRaw = minutesFromTopPx(g.dy);
+                  const deltaMin = snapResize(deltaMinRaw);
+                  let newStart = clamp(b.start + deltaMin, 0, b.end - RESIZE_SNAP_MIN);
+                  setByDate((prev) => ({
                     ...prev,
                     [selectedDate]: (prev[selectedDate] || []).map((x) =>
-                        x.id === b.id ? { ...x, end: newEnd } : x
+                      x.id === b.id ? { ...x, start: newStart } : x
                     ),
-                }));
-                setResizingId(null);
-                setScrollLock(false);
-              },
-              onPanResponderTerminate: () => {
-                setResizingId(null);
-                setScrollLock(false);
-              },
-            });
+                  }));
+                  setResizingId(null);
+                  setScrollLock(false);
+                },
+                onPanResponderTerminate: () => {
+                  setResizingId(null);
+                  setScrollLock(false);
+                },
+              });
 
-              //드래그중인지 확인
-              const isDragging = draggingId === b.id;
-              const translateY = isDragging ? dragY : 0;
+              //  하단 리사이즈 핸들 
+              const handleBottomDrag = PanResponder.create({
+                onStartShouldSetPanResponder: () => true,
+                onPanResponderGrant: () => {
+                  setResizingId({ id: b.id, edge: "bottom", origStart: b.start, origEnd: b.end });
+                  setScrollLock(true);
+                },
+                onPanResponderRelease: (_e, g) => {
+                  const deltaMinRaw = minutesFromTopPx(g.dy);
+                  const deltaMin = snapResize(deltaMinRaw);
+                  let newEnd = clamp(b.end + deltaMin, b.start + RESIZE_SNAP_MIN, 1440);
+                  setByDate((prev) => ({
+                    ...prev,
+                    [selectedDate]: (prev[selectedDate] || []).map((x) =>
+                      x.id === b.id ? { ...x, end: newEnd } : x
+                    ),
+                  }));
+                  setResizingId(null);
+                  setScrollLock(false);
+                },
+                onPanResponderTerminate: () => {
+                  setResizingId(null);
+                  setScrollLock(false);
+                },
+              });
 
-              return ( //일정 블록 감싸는 부분
-                <Animated.View
-                  key={b.id}
-                  {...responder.panHandlers} //드래그 제스처 연결
-                  style={[
-                    styles.block,
-                    {
-                      top,
-                      height,
-                      left: layout.left,
-                      width: layout.width,
-                      backgroundColor: b.color, //색상
-                      transform: [{ translateY }], //드래그시 실시간 이동
-                      zIndex: isDragging ? 2 : 1, //드래그중이면 위로 띄우는 효과
-                    },
-                  ]}
-                >
-                  {/* 상단 길이조절 핸들*/}
-                  <View
-                    pointerEvents="box-only"
-                    {...handleTopDrag.panHandlers}
-                    style={styles.handleTop}
-                  >
-                    {/* 시각효과 */}
-                    <View style={{ width: 36, height: 3, borderRadius: 3, backgroundColor: "#E5E7EB", opacity: 0.9 }} />
-                  </View>
+              const isDragging = draggingId === b.id;
+              const translateY = isDragging ? dragY : 0;
 
-                  {/* 하단 길이조절 핸들 */}
-                  <View
-                    pointerEvents="box-only"
-                    {...handleBottomDrag.panHandlers}
-                    style={styles.handleBottom}
-                  >
-                    <View style={{ width: 36, height: 3, borderRadius: 3, backgroundColor: "#E5E7EB", opacity: 0.9 }} />
-                  </View>
-
-                  {/*드래그중일때 표시되는 반투명 이동중 오버레이*/}
-                  {isDragging && (
-                    <View style={styles.movingOverlay}>
-                      <Text style={styles.movingText}>이동 중</Text>
-                    </View>
-                  )}
-                  {/* 클릭 처리를 PanResponder에서 하므로 TouchableOpacity 제거 */}
-                  {!isDragging && (
-                  <View style={{ flex: 1, overflow: 'hidden', padding: 10 }}>
-                      <Text style={styles.blockTitle} numberOfLines={1}>{b.purpose ?? "할 일"}</Text>
-                      <Text style={styles.blockTime}>
-                        {toHHMM(b.start)} ~ {toHHMM(b.end)}
-                      </Text>
+              return (
+                <Animated.View
+                  key={b.id}
+                  {...responder.panHandlers}
+                  style={[
+                    styles.block,
+                    {
+                      ...layout,
+                      backgroundColor: b.color,
+                      transform: [{ translateY }],
+                      zIndex: isDragging ? 2 : 1,
+                    },
+                  ]}
+                >
+                  {/* 상단 핸들 */}
+                  <View pointerEvents="box-only" {...handleTopDrag.panHandlers} style={styles.handleTop}>
+                    <View style={{ width: 36, height: 3, borderRadius: 3, backgroundColor: "#E5E7EB", opacity: 0.9 }} />
                   </View>
-                  )}
-                </Animated.View>
-              );
-            })}
-          </View>
-        </View>
-      </ScrollView>
 
-      {/* 우하단 추가버튼 */}
-      <TouchableOpacity style={styles.fab} activeOpacity={0.9} onPress={openAdd}>
-        <Text style={styles.fabText}>＋</Text>
-      </TouchableOpacity>
+                  {/* 하단 핸들 */}
+                  <View pointerEvents="box-only" {...handleBottomDrag.panHandlers} style={styles.handleBottom}>
+                    <View style={{ width: 36, height: 3, borderRadius: 3, backgroundColor: "#E5E7EB", opacity: 0.9 }} />
+                  </View>
 
-      {/* 편집 모달 */}
-      <Modal visible={!!editing} //edting이 null이 아닐때 표시
-      transparent animationType="fade" 
-      onRequestClose={closeEdit}//뒤로가기나 배경터치시 닫힘
-      > 
-        <View style={styles.backdrop}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={{ width: "100%", alignItems: "center" }}
-          >
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>할 일 편집</Text>
+                  {/* 드래그 중 오버레이 */}
+                  {isDragging && (
+                    <View style={styles.movingOverlay}>
+                      <Text style={styles.movingText}>이동 중</Text>
+                    </View>
+                  )}
 
-              <Text style={styles.label}>이름</Text>
-              <TextInput
-                value={editPurpose} //현재 입력값
-                onChangeText={setEditPurpose} //텍스트변경시 상태 업데이트
-                placeholder="예: 운동, 업무…" //예시텍스트
-                placeholderTextColor={C.textDim}
-                style={styles.input}
-                returnKeyType="done"
-              />
-              {/*시간 설정*/}
-              <Text style={[styles.label, { marginTop: 12 }]}>시간</Text>
-              <View style={styles.timeRow}>
-                <TouchableOpacity style={styles.timeBtn} onPress={() => setShowPicker("start")}>
-                  <Text style={styles.timeBtnText}>시작 {toHHMM(fromDateToMinutes(startTime))}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.timeBtn} onPress={() => setShowPicker("end")}>
-                  <Text style={styles.timeBtnText}>종료 {toHHMM(fromDateToMinutes(endTime))}</Text>
-                </TouchableOpacity>
-              </View>
+                  {/* 기본 카드 내용 */}
+                  {!isDragging && (
+                    <View style={{ flex: 1, overflow: 'hidden', padding: 10 }}>
+                      <Text style={styles.blockTitle} numberOfLines={1}>{b.purpose ?? "할 일"}</Text>
+                      {(b.type || b.action) && (
+                        <Text style={styles.blockSubTitle} numberOfLines={1}>
+                          [{b.type}{b.action && ` / ${b.action}`}]
+                        </Text>
+                      )}
+                      <Text style={styles.blockTime}>{toHHMM(b.start)} ~ {toHHMM(b.end)}</Text>
+                    </View>
+                  )}
+                </Animated.View>
+              );
+            })}
+          </View>
+        </View>
+      </ScrollView>
 
-              {/*피커*/}
-              {showPicker && (
-                <View style={{ marginTop: 8 }}>
-                  <DateTimePicker
-                    value={showPicker === "start" ? startTime : endTime}
-                    mode="time"
-                    display={Platform.OS === "ios" ? "spinner" : "default"}
-                    is24Hour={false}
-                    onChange={(e: DateTimePickerEvent, d?: Date) => {
-                      if (e.type === "dismissed") {
-                        setShowPicker(null);
-                        return;
-                      }
-                      if (d) {
-                        if (showPicker === "start") setStartTime(d);
-                        else setEndTime(d);
-                        if (Platform.OS !== "ios") setShowPicker(null);
-                      }
-                    }}
-                  />
-                </View>
-              )}
+      {/* 버튼 */}
+      <TouchableOpacity style={styles.fab} activeOpacity={0.9} onPress={openAddModal}>
+        <Text style={styles.fabText}>＋</Text>
+      </TouchableOpacity>
 
-              <View style={styles.footerRow}>
-                <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={closeEdit}>
-                  <Text style={styles.btnGhostText}>취소</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={saveEdit}>
-                  <Text style={styles.btnPrimaryText}>저장</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
-
-      {/* 추가 모달 (UI만있고 확인해도 저장 안 함) */}
-      <Modal visible={addOpen} transparent animationType="fade" onRequestClose={closeAdd}>
-        <View style={styles.backdrop}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={{ width: "100%", alignItems: "center" }}
-          >
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>할 일 추가</Text>
-
-              {/* 랜덤 색 미리보기 */}
-              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 6 }}>
-                <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: addColor, marginRight: 6 }} />
-                <Text style={{ color: C.textDim, fontSize: 12 }}>색상은 임시로 랜덤 적용</Text>
-              </View>
-
-              <Text style={styles.label}>이름</Text>
-              <TextInput
-                value={addPurpose}
-                onChangeText={setAddPurpose}
-                placeholder="예: 운동, 업무…"
-                placeholderTextColor={C.textDim}
-                style={styles.input}
-                returnKeyType="done"
-              />
-
-              <Text style={[styles.label, { marginTop: 12 }]}>시간</Text>
-              <View style={styles.timeRow}>
-                <TouchableOpacity style={styles.timeBtn} onPress={() => setAddPicker("start")}>
-                  <Text style={styles.timeBtnText}>시작 {toHHMM(fromDateToMinutes(addStart))}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.timeBtn} onPress={() => setAddPicker("end")}>
-                  <Text style={styles.timeBtnText}>종료 {toHHMM(fromDateToMinutes(addEnd))}</Text>
-                </TouchableOpacity>
-              </View>
-
-              {addPicker && (
-                <View style={{ marginTop: 8 }}>
-                  <DateTimePicker
-                    value={addPicker === "start" ? addStart : addEnd}
-                    mode="time"
-                    display={Platform.OS === "ios" ? "spinner" : "default"}
-                    is24Hour={false}
-                    onChange={(e: DateTimePickerEvent, d?: Date) => {
-                      if (e.type === "dismissed") {
-                        setAddPicker(null);
-                        return;
-                      }
-                      if (d) {
-                        if (addPicker === "start") setAddStart(d);
-                        else setAddEnd(d);
-                        if (Platform.OS !== "ios") setAddPicker(null);
-                      }
-                    }}
-                  />
-                </View>
-              )}
-
-              <View style={styles.footerRow}>
-                <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={closeAdd}>
-                  <Text style={styles.btnGhostText}>취소</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.btn, styles.btnPrimary]}
-                  onPress={() => {
-                    closeAdd();
-                  }}
-                >
-                  <Text style={styles.btnPrimaryText}>확인</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
-    </View>
-  );
+      {/* 추가/편집 모달 */}
+      <Modal visible={modalMode !== null} transparent animationType="fade" onRequestClose={closeModal}>
+        <NewModalBody
+          key={selectedBlock?.id || 'add'}
+          mode={modalMode!}
+          initialData={selectedBlock}
+          onClose={closeModal}
+          onSave={(newBlock) => { console.log('저장 (UI 전용)', newBlock) }}   //  실제 저장 대신 로그
+          onDelete={(id) => { console.log('삭제 (UI 전용)', id) }}            //  실제 삭제 대신 로그
+        />
+      </Modal>
+    </View>
+  );
 }
 
-// 왼쪽 시간 레일에 표시할 유틸함수, 시간을 받아 1am, 2pm같은 형식으로 변환
+//  할 일 추가/편집 모달, 유형/행동은 커스텀 피커로 선택, 시간은 시스템 DateTimePicker 사용
+const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
+  mode: 'add' | 'edit';
+  initialData: Block | null;
+  onClose: () => void;
+  onSave: (block: Block) => void;
+  onDelete: (id: string) => void;
+}) => {
+  //  폼 상태
+  const [purpose, setPurpose] = useState(initialData?.purpose || '');
+  const [type, setType] = useState(initialData?.type || '개인');
+  const [action, setAction] = useState(initialData?.action || '기타');
+  const [startTime, setStartTime] = useState(() => toDateFromMinutes(initialData?.start || 540));
+  const [endTime, setEndTime] = useState(() => toDateFromMinutes(initialData?.end || 600));
+
+  //  커스텀 문자열 피커(유형/행동) 상태
+  const [pickerState, setPickerState] = useState<{
+    visible: boolean;
+    title: string;
+    items: string[];
+    onSelect: (item: string) => void;
+  }>({ visible: false, title: '', items: [], onSelect: () => {} });
+
+  //  시간 피커(시작/종료) 토글
+  const [timePicker, setTimePicker] = useState<'start' | 'end' | null>(null);
+
+  const handleSave = () => {
+    onSave({
+      id: initialData?.id || makeId(),
+      purpose,
+      type,
+      action,
+      start: fromDateToMinutes(startTime),
+      end: fromDateToMinutes(endTime),
+      color: initialData?.color || randomColor(),
+    });
+    onClose();
+  };
+
+  //  삭제 핸들러
+  const handleDelete = () => {
+    if (initialData?.id) {
+      onDelete(initialData.id);
+    }
+    onClose();
+  };
+
+  //  커스텀 피커 열기
+  const openPicker = (title: string, items: string[], onSelect: (item: string) => void) => {
+    setPickerState({ visible: true, title, items, onSelect });
+  };
+
+  //  시간 변경 콜백
+  const onTimeChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    const currentDate = selectedDate || (timePicker === 'start' ? startTime : endTime);
+    setTimePicker(Platform.OS === 'ios' ? timePicker : null);
+    if (timePicker === 'start') {
+      setStartTime(currentDate);
+    } else {
+      setEndTime(currentDate);
+    }
+  };
+
+  return (
+    <View style={styles.backdrop}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalContainer}>
+        <View style={styles.modalCard}>
+          {/* 모달 헤더 */}
+          <View style={styles.newModalHeader}>
+            <Text style={styles.modalTitle}>{mode === 'add' ? '할 일 추가' : '할 일 편집'}</Text>
+            {mode === 'edit' && (
+              <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
+                <Text style={styles.deleteButtonText}>삭제</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* 할 일 이름 */}
+          <Text style={styles.label}>할 일 이름</Text>
+          <TextInput
+            style={styles.input}
+            value={purpose}
+            onChangeText={setPurpose}
+            placeholder="예: 운동, 업무..."
+            placeholderTextColor={C.textDim}
+          />
+
+          {/* 할일 유형(커스텀 피커) */}
+          <Text style={styles.label}>할일 유형</Text>
+          <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('할일 유형 선택', TYPES, setType)}>
+            <Text style={styles.pickerButtonText}>{type}</Text>
+          </TouchableOpacity>
+
+          {/* 행동 유형(커스텀 피커) */}
+          <Text style={styles.label}>행동 유형</Text>
+          <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('행동 유형 선택', ACTIONS, setAction)}>
+            <Text style={styles.pickerButtonText}>{action}</Text>
+          </TouchableOpacity>
+
+          {/* 시간 선택 (시작/종료) */}
+          <Text style={styles.label}>시간</Text>
+          <View style={styles.timeRow}>
+            <TouchableOpacity style={styles.timeBtn} onPress={() => setTimePicker('start')}>
+              <Text style={styles.timeBtnText}>시작 {toHHMM(fromDateToMinutes(startTime))}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.timeBtn} onPress={() => setTimePicker('end')}>
+              <Text style={styles.timeBtnText}>종료 {toHHMM(fromDateToMinutes(endTime))}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 하단 버튼 */}
+          <View style={styles.footerRow}>
+            <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={onClose}>
+              <Text style={styles.btnGhostText}>취소</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={handleSave}>
+              <Text style={styles.btnPrimaryText}>{mode === 'add' ? '추가' : '저장'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+
+      {/* 커스텀 문자열 피커 모달 */}
+      <Modal
+        transparent={true}
+        visible={pickerState.visible}
+        animationType="fade"
+        onRequestClose={() => setPickerState({ ...pickerState, visible: false })}
+      >
+        <TouchableOpacity style={styles.pickerBackdrop} onPress={() => setPickerState({ ...pickerState, visible: false })}>
+          <View style={styles.pickerContainer}>
+            <Text style={styles.pickerTitle}>{pickerState.title}</Text>
+            {pickerState.items.map(item => (
+              <TouchableOpacity
+                key={item}
+                style={styles.pickerItem}
+                onPress={() => {
+                  pickerState.onSelect(item);
+                  setPickerState({ ...pickerState, visible: false });
+                }}
+              >
+                <Text style={styles.pickerItemText}>{item}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 네이티브 시간 피커 */}
+      {timePicker && (
+        <DateTimePicker
+          value={timePicker === 'start' ? startTime : endTime}
+          mode="time"
+          display="spinner"
+          onChange={onTimeChange}
+        />
+      )}
+    </View>
+  );
+};
+
+//  24h → 12h am/pm 라벨
 function formatHour(h: number) {
-  const ampm = h < 12 ? "am" : "pm";
-  const hour12 = h % 12 === 0 ? 12 : h % 12;
-  return `${hour12}${ampm}`;
+  const ampm = h < 12 ? "am" : "pm";
+  const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${hour12}${ampm}`;
 }
 
-// ---------- 스타일 ----------
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg }, //전체 배경
-  safeTop: { backgroundColor: C.bg }, //상단 영역
+  container: { flex: 1, backgroundColor: C.bg },
+  safeTop: { backgroundColor: C.bg },
 
-  //헤더
-  header: {
-    height: 56,
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.border,
-  },
-  headerBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
-  headerBtnText: { fontSize: 18, fontWeight: "700", color: C.text },
-  headerTitle: { fontSize: 16, fontWeight: "700", color: C.text },
+  // 헤더
+  header: {
+    height: 56,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+  },
+  headerBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  headerBtnText: { fontSize: 24, color: C.text, fontWeight: 'bold' },
+  headerTitle: { fontSize: 16, fontWeight: "700", color: C.text },
 
-  //타임라인
-  timelineRow: { flexDirection: "row" },
+  // 타임라인
+  timelineRow: { flexDirection: "row" },
+  leftRail: {
+    width: LABEL_GUTTER,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: C.border,
+  },
+  hourRow: { paddingLeft: 8, justifyContent: "flex-start" },
+  hourLabel: { fontSize: 12, color: C.textDim, marginTop: -6 },
+  hourLine: {
+    position: "absolute",
+    left: 0, right: 0, top: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: C.border,
+  },
 
-  //왼쪽 시간표시 레일
-  leftRail: {
-    width: LABEL_GUTTER,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: C.border,
-  },
-  hourRow: { paddingLeft: 8, justifyContent: "flex-start" },
-  hourLabel: { fontSize: 12, color: C.textDim, marginTop: 2 },
-  hourLine: {
-    position: "absolute",
-    left: 0, right: 0, bottom: 0,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: C.border,
-  },
+  // 캔버스/그리드
+  canvas: { flex: 1, paddingRight: 16, paddingLeft: 8, position: "relative" },
+  gridLine: {
+    position: "absolute",
+    left: 0, right: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#1e293b",
+  },
 
-  //오른쪽 일정 캔버스
-  canvas: { flex: 1, paddingRight: 16, paddingLeft: 8, position: "relative" },
-  gridLine: {
-    position: "absolute",
-    left: 0, right: 0,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#1e293b",
-  },
-
-  // 일정블록 스타일
-  block: {
-    position: "absolute",
+  // 블록 카드
+  block: {
+    position: "absolute",
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.1)',
-    paddingRight: 4, // 겹치는 블록 사이에 약간의 여백
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-  },
-  blockTitle: { fontSize: 13, fontWeight: "700", color: "#0B1220" },
-  blockTime: { fontSize: 12, color: "#0B1220", opacity: 0.9, marginTop: 2 },
+    borderRadius: 10,
+  },
+  blockTitle: { fontSize: 13, fontWeight: "700", color: "#0B1220" },
+  blockSubTitle: { fontSize: 11, fontWeight: "500", color: "#0B1220", opacity: 0.8, marginTop: 2 },
+  blockTime: { fontSize: 12, color: "#0B1220", opacity: 0.9, marginTop: 2 },
 
-  //드래그 표시 오버레이, 이동중 텍스트
-  movingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 10,
-  },
-  movingText: {
-    color: "#0B1220",
-    fontWeight: "800",
-    fontSize: 14,
-    backgroundColor: "#E5E7EB",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
+  // 드래그 중 오버레이
+  movingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+  },
+  movingText: {
+    color: "#0B1220",
+    fontWeight: "800",
+    fontSize: 14,
+    backgroundColor: "#E5E7EB",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
 
-  // 편집/추가 모달 공통
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-  modalCard: {
-    width: "100%",
-    backgroundColor: C.card,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    borderColor: C.border,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 18,
-  },
-  modalTitle: { color: C.text, fontSize: 18, fontWeight: "800", marginBottom: 8 },
+  // 버튼
+  fab: {
+    position: "absolute",
+    right: 16,
+    bottom: 22,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: C.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+  },
+  fabText: { color: "#0B1220", fontSize: 26, fontWeight: "800", marginTop: -2 },
 
-  //라벨
-  label: { color: C.textDim, fontSize: 12, marginBottom: 6 },
-  //입력창
-  input: {
-    backgroundColor: "#0B1220",
-    borderColor: C.border,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    color: C.text,
-  },
+  // 리사이즈 핸들
+  handleTop: {
+    position: "absolute", top: 0, left: 0, right: 0, height: 28, marginTop: -8, justifyContent: "center", alignItems: "center", zIndex: 3,
+  },
+  handleBottom: {
+    position: "absolute", bottom: 0, left: 0, right: 0, height: 28, marginBottom: -8, justifyContent: "center", alignItems: "center", zIndex: 3,
+  },
 
-  //시간설정 버튼
-  timeRow: { flexDirection: "row", gap: 8 },
-  timeBtn: {
-    flex: 1,
-    backgroundColor: "#0B1220",
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  timeBtnText: { color: C.text, fontWeight: "700" },
-//하단버튼
-  footerRow: { flexDirection: "row", gap: 10, marginTop: 16 },
-  btn: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  btnGhost: { borderWidth: 1, borderColor: C.border, backgroundColor: "#0B1220" },
-  btnGhostText: { color: C.text },
+  // 모달
+  backdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContainer: {
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: C.card,
+    borderRadius: 16,
+    padding: 20,
+    borderColor: C.border,
+    borderWidth: 1,
+  },
+  newModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    color: C.text,
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+  deleteButton: {
+    backgroundColor: C.danger,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  deleteButtonText: {
+    color: C.text,
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
 
-  btnPrimary: { backgroundColor: C.primary },
-  btnPrimaryText: { color: "#0B1220", fontWeight: "800" },
+  // 폼
+  label: {
+    color: C.textDim,
+    fontSize: 14,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: C.bg,
+    borderColor: C.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: C.text,
+    fontSize: 16,
+  },
+  pickerButton: {
+    backgroundColor: C.bg,
+    borderColor: C.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  pickerButtonText: {
+    color: C.text,
+    fontSize: 16,
+  },
+  timeRow: { flexDirection: "row", gap: 12 },
+  timeBtn: {
+    flex: 1,
+    backgroundColor: C.bg,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  timeBtnText: { color: C.text, fontWeight: "600", fontSize: 16 },
 
-  fab: {
-    position: "absolute",
-    right: 16,
-    bottom: 22,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: C.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 4,
-  },
-  fabText: { color: "#0B1220", fontSize: 26, fontWeight: "800", marginTop: -2 },
+  footerRow: { flexDirection: "row", gap: 12, marginTop: 24 },
+  btn: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  btnGhost: { backgroundColor: C.border },
+  btnGhostText: { color: C.text, fontWeight: "700" },
+  btnPrimary: { backgroundColor: C.primary },
+  btnPrimaryText: { color: "#FFF", fontWeight: "bold" },
 
-  // 리사이즈 핸들
-  handleTop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 28,
-    marginTop: -8,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 3,
-  },
-  handleBottom: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 28,
-    marginBottom: -8,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 3,
-  },
+  pickerBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  pickerContainer: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    padding: 16,
+    width: '80%',
+    borderColor: C.border,
+    borderWidth: 1,
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: C.text,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  pickerItem: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  pickerItemText: {
+    color: C.text,
+    fontSize: 16,
+    textAlign: 'center',
+  },
 });
