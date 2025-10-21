@@ -1,12 +1,34 @@
-import React, { useMemo, useState } from "react";
-import {
-  View, Text, StyleSheet, Dimensions, ScrollView,
-  TouchableOpacity, Modal, KeyboardAvoidingView, Platform,
-  TextInput
-} from "react-native";
-import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { useRouter } from "expo-router";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Dimensions,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+/** 🔹[추가] Firebase 임포트 */
+import { onAuthStateChanged } from "firebase/auth";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  updateDoc
+} from "firebase/firestore";
+import { auth, db } from "./firebaseConfig";
 
 // 기기의 화면 너비를 가져옴
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -31,11 +53,17 @@ const LABEL_GUTTER = 56;
 
 // 상단 요일 선택
 const DAYS = [
-    { key: 'mon', label: '월' }, { key: 'tue', label: '화' },
-    { key: 'wed', label: '수' }, { key: 'thu', label: '목' },
-    { key: 'fri', label: '금' }, { key: 'sat', label: '토' },
-    { key: 'sun', label: '일' },
+  { key: 'mon', label: '월' }, { key: 'tue', label: '화' },
+  { key: 'wed', label: '수' }, { key: 'thu', label: '목' },
+  { key: 'fri', label: '금' }, { key: 'sat', label: '토' },
+  { key: 'sun', label: '일' },
 ];
+
+/** 🔹[추가] Firestore 문서명 매핑 (mon → monday 등) */
+const DAY_DOC: Record<string, string> = {
+  mon: "monday", tue: "tuesday", wed: "wednesday", thu: "thursday",
+  fri: "friday", sat: "saturday", sun: "sunday",
+};
 
 // 할일 유형
 const TYPES = ['휴식', '가족', '개인', '자기개발', '이동', '식사'];
@@ -65,13 +93,15 @@ const randomColor = () => {
 
 // 일정 블록 하나의 데이터 구조
 type Block = {
-  id: string;         // 고유 식별자
+  id: string;         // 고유 식별자 (Firestore 문서 id)
   start: number;      // 시작 시간 (분 단위)
   end: number;        // 종료 시간 (분 단위)
   color: string;      // 블록 색상
   purpose?: string;   // 할 일 이름
   type?: string;      // 할일 유형
   action?: string;    // 행동 유형
+  /** 🔹[추가] DB 규격 반영 */
+  isGoal?: boolean;
 };
 
 // 임시데이터
@@ -95,7 +125,6 @@ const buildInitialFixedSchedules = () => {
   } as Record<string, Block[]>;
 };
 
-
 export default function FixedScheduleScreen() {
   // 화면 이동을 위한 라우터 훅
   const router = useRouter();
@@ -104,7 +133,18 @@ export default function FixedScheduleScreen() {
 
   // 모든 요일의 일정 데이터를 관리하는 상태
   const [byDay, setByDay] = useState<Record<string, Block[]>>(buildInitialFixedSchedules());
-  
+
+  /** 🔹[추가] 로그인 사용자 uid */
+  const [uid, setUid] = useState<string | null>(null);
+
+  /** 🔹[추가] 로그인 상태 구독 */
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUid(u?.uid ?? null);
+    });
+    return unsub;
+  }, []);
+
   // byDay 데이터에서 현재 선택된 요일의 일정 목록만 추출
   // useMemo를 사용하여 byDay나 selectedDay가 변경될 때만 재계산
   const blocks = useMemo(() => byDay[selectedDay] || [], [byDay, selectedDay]);
@@ -155,7 +195,7 @@ export default function FixedScheduleScreen() {
     }
     return layouts; // 계산된 레이아웃 정보를 반환
   }, [blocks]);
-  
+
   // 모달의 상태 관리
   const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
   // 현재 편집 중인 블록 데이터를 저장하는 상태
@@ -182,26 +222,105 @@ export default function FixedScheduleScreen() {
   // 타임라인의 전체 높이를 계산 (24시간 * 시간당 높이)
   const contentHeight = HOUR_HEIGHT * 24;
 
+  /** 🔹[추가] 선택된 요일의 timeTable 실시간 구독 */
+  useEffect(() => {
+    if (!uid) return;
+    const dayDocName = DAY_DOC[selectedDay];
+    const colRef = collection(db, "User", uid, "routinTable", dayDocName, "timeTable");
+    const qRef = query(colRef, orderBy("startTime", "asc"));
+    const unsub = onSnapshot(
+      qRef,
+      (snap) => {
+        const list: Block[] = snap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            id: d.id,
+            start: data.startTime ?? 0,
+            end: data.endTime ?? 0,
+            color: data.color || randomColor(),
+            purpose: data.purpose,
+            type: data.type,
+            action: data.action,
+            isGoal: data.isGoal ?? false,
+          };
+        });
+        setByDay((prev) => ({ ...prev, [selectedDay]: list }));
+      },
+      (err) => {
+        console.warn(err);
+        Alert.alert("불러오기 실패", "시간표 데이터를 불러오는 중 오류가 발생했습니다.");
+      }
+    );
+    return unsub;
+  }, [uid, selectedDay]);
+
+  /** 🔹[추가] DB 저장/수정/삭제 헬퍼 */
+  const saveBlock = async (mode: 'add' | 'edit', block: Block) => {
+    if (!uid) {
+      Alert.alert("로그인이 필요합니다", "시간표를 저장하려면 로그인하세요.");
+      return;
+    }
+    if (block.end <= block.start) {
+      Alert.alert("시간 확인", "종료 시간이 시작 시간보다 커야 합니다.");
+      return;
+    }
+    const dayDocName = DAY_DOC[selectedDay];
+    const colRef = collection(db, "User", uid, "routinTable", dayDocName, "timeTable");
+
+    const payload = {
+      startTime: block.start,
+      endTime: block.end,
+      color: block.color || randomColor(),
+      purpose: block.purpose || "",
+      type: block.type || "",
+      action: block.action || "",
+      isGoal: block.isGoal ?? false,
+    };
+
+    try {
+      if (mode === "edit" && selectedBlock?.id) {
+        await updateDoc(doc(colRef, selectedBlock.id), payload);
+      } else {
+        await addDoc(colRef, payload);
+      }
+    } catch (e: any) {
+      console.warn(e);
+      Alert.alert("저장 실패", e?.message ?? "저장 중 오류가 발생했습니다.");
+    }
+  };
+
+  const deleteBlock = async (id: string) => {
+    if (!uid) return;
+    const dayDocName = DAY_DOC[selectedDay];
+    const colRef = collection(db, "User", uid, "routinTable", dayDocName, "timeTable");
+    try {
+      await deleteDoc(doc(colRef, id));
+    } catch (e: any) {
+      console.warn(e);
+      Alert.alert("삭제 실패", e?.message ?? "삭제 중 오류가 발생했습니다.");
+    }
+  };
+
   return (
     <View style={styles.container}>
       <SafeAreaView edges={["top"]} style={styles.safeTop}>
         {/* 헤더 */}
         <View style={styles.header}>
-            <Text style={styles.headerTitle}>고정 시간 설정</Text>
+          <Text style={styles.headerTitle}>고정 시간 설정</Text>
         </View>
         {/* 요일 선택 버튼들 */}
         <View style={styles.daySelector}>
-            {DAYS.map(day => (
-                <TouchableOpacity 
-                    key={day.key} 
-                    style={[styles.dayButton, selectedDay === day.key && styles.dayButtonSelected]}
-                    onPress={() => setSelectedDay(day.key)}
-                >
-                    <Text style={[styles.dayButtonText, selectedDay === day.key && styles.dayButtonTextSelected]}>
-                        {day.label}
-                    </Text>
-                </TouchableOpacity>
-            ))}
+          {DAYS.map(day => (
+            <TouchableOpacity
+              key={day.key}
+              style={[styles.dayButton, selectedDay === day.key && styles.dayButtonSelected]}
+              onPress={() => setSelectedDay(day.key)}
+            >
+              <Text style={[styles.dayButtonText, selectedDay === day.key && styles.dayButtonTextSelected]}>
+                {day.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
       </SafeAreaView>
 
@@ -233,20 +352,20 @@ export default function FixedScheduleScreen() {
               const layout = blockLayouts.get(b.id);
               if (!layout) return null;
               return (
-                <View key={b.id} style={[ styles.block, { ...layout, backgroundColor: b.color }]}>
+                <View key={b.id} style={[styles.block, { ...layout, backgroundColor: b.color }]}>
                   {/* 블록을 터치하면 편집 모달이 열림 */}
                   <TouchableOpacity activeOpacity={0.7} onPress={() => openEditModal(b)} style={{ flex: 1, overflow: 'hidden', padding: 10 }}>
-                      <Text style={styles.blockTitle} numberOfLines={1}>{b.purpose ?? "할 일"}</Text>
-                      {/* 할일 유형과 행동 유형이 있으면 표시 */}
-                       {(b.type || b.action) && (
-                        <Text style={styles.blockSubTitle} numberOfLines={1}>
-                          [{b.type}{b.action && ` / ${b.action}`}]
-                        </Text>
-                      )}
-                      <Text style={styles.blockTime}>
-                        {toHHMM(b.start)} ~ {toHHMM(b.end)}
+                    <Text style={styles.blockTitle} numberOfLines={1}>{b.purpose ?? "할 일"}</Text>
+                    {/* 할일 유형과 행동 유형이 있으면 표시 */}
+                    {(b.type || b.action) && (
+                      <Text style={styles.blockSubTitle} numberOfLines={1}>
+                        [{b.type}{b.action && ` / ${b.action}`}]
                       </Text>
-                    </TouchableOpacity>
+                    )}
+                    <Text style={styles.blockTime}>
+                      {toHHMM(b.start)} ~ {toHHMM(b.end)}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               );
             })}
@@ -266,8 +385,9 @@ export default function FixedScheduleScreen() {
           mode={modalMode!}
           initialData={selectedBlock}
           onClose={closeModal}
-          onSave={(newBlock) => { console.log('저장 (UI 전용)', newBlock) }} 
-          onDelete={(id) => { console.log('삭제 (UI 전용)', id) }}
+          /** 🔹[변경] 저장/삭제 시 Firestore 연동 */
+          onSave={(newBlock) => { if (modalMode) saveBlock(modalMode, newBlock); }}
+          onDelete={(id) => { deleteBlock(id); }}
         />
       </Modal>
     </View>
@@ -297,20 +417,21 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
   }>({ visible: false, title: '', items: [], onSelect: () => {} });
 
   const [timePicker, setTimePicker] = useState<'start' | 'end' | null>(null);
-  
+
   const handleSave = () => {
     onSave({
-      id: initialData?.id || makeId(),
+      id: initialData?.id || makeId(), // id는 UI용. Firestore의 새 문서는 addDoc으로 생성됨
       purpose,
       type,
       action,
       start: fromDateToMinutes(startTime),
       end: fromDateToMinutes(endTime),
       color: initialData?.color || randomColor(),
+      isGoal: initialData?.isGoal ?? false,
     });
-    onClose(); 
+    onClose();
   };
-  
+
   // 삭제버튼
   const handleDelete = () => {
     if (initialData?.id) {
@@ -323,7 +444,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
   const openPicker = (title: string, items: string[], onSelect: (item: string) => void) => {
     setPickerState({ visible: true, title, items, onSelect });
   };
-  
+
   // DateTimePicker에서 시간이 변경될 때 호출
   const onTimeChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
     const currentDate = selectedDate || (timePicker === 'start' ? startTime : endTime);
@@ -373,7 +494,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
           <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('행동 유형 선택', ACTIONS, setAction)}>
             <Text style={styles.pickerButtonText}>{action}</Text>
           </TouchableOpacity>
-          
+
           {/* 시간 선택 버튼 */}
           <Text style={styles.label}>시간</Text>
           <View style={styles.timeRow}>
@@ -396,7 +517,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
           </View>
         </View>
       </KeyboardAvoidingView>
-      
+
       {/* 커스텀 피커 선택창 모달 */}
       <Modal
         transparent={true}

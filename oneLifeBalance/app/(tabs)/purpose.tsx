@@ -1,13 +1,40 @@
+import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  View, Text, StyleSheet, Dimensions, ScrollView,
-  TouchableOpacity, Modal, KeyboardAvoidingView, Platform,
-  TextInput, Animated, PanResponder
+  Animated,
+  Dimensions,
+  KeyboardAvoidingView,
+  Modal,
+  PanResponder,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
-import { Ionicons } from "@expo/vector-icons";
+
+// [MOD] Firestore & Auth import
+import { onAuthStateChanged } from "firebase/auth";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc
+} from "firebase/firestore";
+import { auth, db } from "./firebaseConfig"; // 경로 확인
+// [MOD] ───────────────────────────────────────────────────────────────
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -66,14 +93,15 @@ type Block = {
   id: string;
   start: number;
   end: number;
-  color: string;
+  color: string;     // 서버에는 저장하지 않음(로컬 전용)
   purpose?: string;
   type?: string;
   action?: string;
-  isGoal?: boolean; 
+  isGoal?: boolean;
+  // fix는 아직 UI에서 안 씀 → 서버에는 false로 저장
 };
 
-//  초기 표시용 데이터
+//  초기 표시용 데이터(초기 렌더용 목업)
 const makeId = () => Math.random().toString(36).slice(2, 9);
 const buildInitial = () => {
   const today = fmt(new Date());
@@ -91,17 +119,111 @@ const buildInitial = () => {
   } as Record<string, Block[]>;
 };
 
+// [MOD] ───────────── Firestore 경로 유틸 & 저장/삭제 로직 ─────────────
+const dateDocRef = (uid: string, dateISO: string) =>
+  doc(db, "User", uid, "dateTable", dateISO);
+const timeTableColRef = (uid: string, dateISO: string) =>
+  collection(db, "User", uid, "dateTable", dateISO, "timeTable");
+const timeTableDocRef = (uid: string, dateISO: string, timeTableId: string) =>
+  doc(db, "User", uid, "dateTable", dateISO, "timeTable", timeTableId);
+
+async function ensureDateDocUseTrue(uid: string, dateISO: string) {
+  const dref = dateDocRef(uid, dateISO);
+  const snap = await getDoc(dref);
+  if (snap.exists()) {
+    const data = snap.data() as any;
+    if (!data?.Use) {
+      await updateDoc(dref, { Use: true, updatedAt: serverTimestamp() });
+    }
+  } else {
+    await setDoc(dref, { Use: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+  }
+}
+
+async function saveTimeBlock(uid: string, dateISO: string, block: Block) {
+  if (!(block.start >= 0 && block.end <= 1440 && block.end > block.start)) {
+    throw new Error("시간 범위가 올바르지 않습니다.");
+  }
+  await ensureDateDocUseTrue(uid, dateISO);
+
+  const tref = timeTableDocRef(uid, dateISO, block.id);
+  const payload = {
+    startTime: block.start,
+    endTime: block.end,
+    type: block.type ?? "",
+    action: block.action ?? "",
+    purpose: block.purpose ?? "",
+    isGoal: !!block.isGoal,
+    fix: false, // 아직 UI에서 안 쓰므로 false로 저장
+    updatedAt: serverTimestamp(),
+  };
+  await setDoc(tref, { ...payload, createdAt: serverTimestamp() }, { merge: true });
+}
+
+async function deleteTimeBlock(uid: string, dateISO: string, blockId: string) {
+  const tref = timeTableDocRef(uid, dateISO, blockId);
+  await deleteDoc(tref);
+
+  // 남은 블록 없으면 Use=false
+  const col = timeTableColRef(uid, dateISO);
+  const rest = await getDocs(col);
+  if (rest.empty) {
+    await updateDoc(dateDocRef(uid, dateISO), { Use: false, updatedAt: serverTimestamp() }).catch(() => {});
+  }
+}
+// [MOD] ───────────────────────────────────────────────────────────────
+
 export default function PurposeScreen() {
   const router = useRouter();
   const { date } = useLocalSearchParams<{ date?: string }>();
   const selectedDate = (typeof date === "string" && date) || fmt(new Date());
 
+  // [MOD] 로그인 사용자 uid 상태
+  const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
+
   //  날짜별 블록 상태와 현재 날짜의 블록
   const [byDate, setByDate] = useState<Record<string, Block[]>>(buildInitial());
   const blocks = useMemo(() => byDate[selectedDate] || [], [byDate, selectedDate]);
 
+  // [MOD] 로그인 상태 구독
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => setUid(u?.uid ?? null));
+    return () => unsub();
+  }, []);
+
+  // [MOD] 선택 날짜의 timeTable 실시간 구독
+  useEffect(() => {
+    if (!uid) return;
+    const colRef = timeTableColRef(uid, selectedDate);
+    const q = query(colRef, orderBy("startTime", "asc"));
+
+    const unsub = onSnapshot(q, (snap) => {
+      setByDate((prev) => {
+        const prevList = prev[selectedDate] || [];
+        const nextBlocks: Block[] = snap.docs.map((docSnap) => {
+          const d = docSnap.data() as any;
+          const prevItem = prevList.find((x) => x.id === docSnap.id);
+          return {
+            id: docSnap.id,
+            start: typeof d.startTime === "number" ? d.startTime : 0,
+            end: typeof d.endTime === "number" ? d.endTime : 0,
+            type: d.type || "",
+            action: d.action || "",
+            purpose: d.purpose || "",
+            isGoal: !!d.isGoal,
+            color: prevItem?.color || randomColor(),
+          };
+        });
+        return { ...prev, [selectedDate]: nextBlocks };
+      });
+    }, (err) => {
+      console.warn("[onSnapshot timeTable] error:", err);
+    });
+
+    return () => unsub();
+  }, [uid, selectedDate]);
+
   //  겹치는 블록을 가로 분할 배치
-  //  시작시각 기준 정렬 → DFS로 겹침 그룹 탐색 → 그룹 내 길이 오름차순 정렬 → 순서대로 컬럼폭 분배
   const blockLayouts = useMemo(() => {
     const sortedByTime = [...blocks].sort((a, b) => a.start - b.start);
     if (sortedByTime.length === 0) return new Map();
@@ -113,7 +235,6 @@ export default function PurposeScreen() {
       if (processed.has(block.id)) continue;
       const group: Block[] = [];
 
-      //  겹치는 블록을 같은 그룹으로 묶음
       const findOverlapsRecursive = (b: Block) => {
         group.push(b);
         processed.add(b.id);
@@ -126,11 +247,9 @@ export default function PurposeScreen() {
       };
       findOverlapsRecursive(block);
 
-      // 짧은 것부터 앞 컬럼 배치
       const groupSortedByDuration = group.sort((a, b) => (a.end - a.start) - (b.end - b.start));
       const totalColumns = groupSortedByDuration.length;
 
-      //  각 블록의 top/height(분→px), left/width(가로 분할) 계산
       groupSortedByDuration.forEach((b, colIndex) => {
         layouts.set(b.id, {
           top: (b.start / 60) * HOUR_HEIGHT,
@@ -166,37 +285,49 @@ export default function PurposeScreen() {
     setSelectedBlock(null);
   };
 
-  // 할 일을 저장하거나 수정하는 함수
-  const handleSave = (newBlock: Block) => {
+  // [MOD] 저장/삭제 핸들러: 로컬 반영 + 서버 반영
+  const handleSave = async (newBlock: Block) => {
     setByDate(prev => {
       const currentDayBlocks = prev[selectedDate] || [];
       const existingIndex = currentDayBlocks.findIndex(b => b.id === newBlock.id);
-      
+
       let updatedBlocks;
       if (existingIndex > -1) {
-        // 기존 블록 수정
         updatedBlocks = [...currentDayBlocks];
         updatedBlocks[existingIndex] = newBlock;
       } else {
-        // 새 블록 추가
         updatedBlocks = [...currentDayBlocks, newBlock];
       }
-      
       return { ...prev, [selectedDate]: updatedBlocks };
     });
+
+    try {
+      const u = auth.currentUser;
+      if (!u) throw new Error("로그인이 필요합니다.");
+      await saveTimeBlock(u.uid, selectedDate, newBlock);
+    } catch (e) {
+      console.warn("[handleSave] Firestore 저장 실패:", e);
+    }
   };
 
-  //  할 일을 삭제하는 함수
-  const handleDelete = (idToDelete: string) => {
+  const handleDelete = async (idToDelete: string) => {
     setByDate(prev => ({
       ...prev,
       [selectedDate]: (prev[selectedDate] || []).filter(b => b.id !== idToDelete),
     }));
+
+    try {
+      const u = auth.currentUser;
+      if (!u) throw new Error("로그인이 필요합니다.");
+      await deleteTimeBlock(u.uid, selectedDate, idToDelete);
+    } catch (e) {
+      console.warn("[handleDelete] Firestore 삭제 실패:", e);
+    }
   };
 
   //  스크롤락: 드래그/리사이즈 중에는 ScrollView 스크롤 비활성화
   const [scrollLock, setScrollLock] = useState(false);
-  const dragY = useState(new Animated.Value(0))[0]; 
+  const dragY = useState(new Animated.Value(0))[0];
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragStartTop, setDragStartTop] = useState(0);
   const [dragDurationMin, setDragDurationMin] = useState(0);
@@ -268,12 +399,11 @@ export default function PurposeScreen() {
 
               const { top, height } = layout;
 
-              //  블록 이동용 PanResponder
+              // [MOD] 블록 이동용 PanResponder (Release 시 서버 저장)
               const responder = PanResponder.create({
                 onStartShouldSetPanResponder: (e) => {
                   if (resizingId) return false;
                   const y = (e.nativeEvent as any).locationY ?? 0;
-                  //  상/하단 핸들에서는 이동 대신 리사이즈가 우선되어야 하므로 false
                   if (inTopHandleZone(y) || inBottomHandleZone(y, height)) return false;
                   return true;
                 },
@@ -294,13 +424,11 @@ export default function PurposeScreen() {
                 onPanResponderRelease: (_e, g) => {
                   const isClick = Math.abs(g.dx) < 5 && Math.abs(g.dy) < 5;
                   if (isClick) {
-                    //  클릭으로 판단되면 편집 모달 열기
                     openEditModal(b);
                     setDraggingId(null);
                     setScrollLock(false);
                     return;
                   }
-                  //  플릭 보정: 속도가 빠르면 추가 이동 반영
                   const projectedDy = Math.abs(g.vy) >= MIN_PROJECT_VY ? g.dy + g.vy * FLICK_PROJECT_PX : g.dy;
                   const newTopPx = dragStartTop + projectedDy;
                   let newStartMin = minutesFromTopPx(newTopPx);
@@ -308,7 +436,7 @@ export default function PurposeScreen() {
                   newStartMin = clamp(newStartMin, 0, 1440 - dragDurationMin);
                   const newEndMin = newStartMin + dragDurationMin;
 
-                  //  실제 상태 반영
+                  // 로컬 상태 반영
                   setByDate((prev) => ({
                     ...prev,
                     [selectedDate]: (prev[selectedDate] || []).map((x) =>
@@ -316,13 +444,23 @@ export default function PurposeScreen() {
                     ),
                   }));
 
-                  //  드래그 보정값 리셋 & 스크롤 언락
+                  // [MOD] 드롭 순간 Firestore 저장 (변경시에만)
+                  if (newStartMin !== b.start || newEndMin !== b.end) {
+                    const u = auth.currentUser;
+                    if (u) {
+                      const updated: Block = { ...b, start: newStartMin, end: newEndMin };
+                      void saveTimeBlock(u.uid, selectedDate, updated).catch((e) =>
+                        console.warn("[drag drop] Firestore 저장 실패:", e)
+                      );
+                    }
+                  }
+
                   Animated.spring(dragY, { toValue: 0, useNativeDriver: false }).start(() => {
                     setDraggingId(null);
                     setScrollLock(false);
                   });
                 },
-                onPanResponderTerminationRequest: () => false, //  중단 거부
+                onPanResponderTerminationRequest: () => false,
                 onPanResponderTerminate: () => {
                   Animated.spring(dragY, { toValue: 0, useNativeDriver: false }).start(() => {
                     setDraggingId(null);
@@ -331,7 +469,7 @@ export default function PurposeScreen() {
                 },
               });
 
-              //  상단 리사이즈 핸들
+              // [MOD] 상단 리사이즈 핸들 (Release 시 서버 저장)
               const handleTopDrag = PanResponder.create({
                 onStartShouldSetPanResponder: () => true,
                 onPanResponderGrant: () => {
@@ -342,12 +480,26 @@ export default function PurposeScreen() {
                   const deltaMinRaw = minutesFromTopPx(g.dy);
                   const deltaMin = snapResize(deltaMinRaw);
                   let newStart = clamp(b.start + deltaMin, 0, b.end - RESIZE_SNAP_MIN);
+
+                  // 로컬
                   setByDate((prev) => ({
                     ...prev,
                     [selectedDate]: (prev[selectedDate] || []).map((x) =>
                       x.id === b.id ? { ...x, start: newStart } : x
                     ),
                   }));
+
+                  // 서버
+                  if (newStart !== b.start) {
+                    const u = auth.currentUser;
+                    if (u) {
+                      const updated: Block = { ...b, start: newStart };
+                      void saveTimeBlock(u.uid, selectedDate, updated).catch((e) =>
+                        console.warn("[resize top] Firestore 저장 실패:", e)
+                      );
+                    }
+                  }
+
                   setResizingId(null);
                   setScrollLock(false);
                 },
@@ -357,7 +509,7 @@ export default function PurposeScreen() {
                 },
               });
 
-              //  하단 리사이즈 핸들 
+              // [MOD] 하단 리사이즈 핸들 (Release 시 서버 저장)
               const handleBottomDrag = PanResponder.create({
                 onStartShouldSetPanResponder: () => true,
                 onPanResponderGrant: () => {
@@ -368,12 +520,26 @@ export default function PurposeScreen() {
                   const deltaMinRaw = minutesFromTopPx(g.dy);
                   const deltaMin = snapResize(deltaMinRaw);
                   let newEnd = clamp(b.end + deltaMin, b.start + RESIZE_SNAP_MIN, 1440);
+
+                  // 로컬
                   setByDate((prev) => ({
                     ...prev,
                     [selectedDate]: (prev[selectedDate] || []).map((x) =>
                       x.id === b.id ? { ...x, end: newEnd } : x
                     ),
                   }));
+
+                  // 서버
+                  if (newEnd !== b.end) {
+                    const u = auth.currentUser;
+                    if (u) {
+                      const updated: Block = { ...b, end: newEnd };
+                      void saveTimeBlock(u.uid, selectedDate, updated).catch((e) =>
+                        console.warn("[resize bottom] Firestore 저장 실패:", e)
+                      );
+                    }
+                  }
+
                   setResizingId(null);
                   setScrollLock(false);
                 },
@@ -420,9 +586,7 @@ export default function PurposeScreen() {
                   {/* 기본 카드 내용 */}
                   {!isDragging && (
                     <View style={{ flex: 1, overflow: 'hidden', padding: 10 }}>
-                       {/*  목표 아이콘과 제목을 함께 보여주기 위한 View */}
                       <View style={styles.blockTitleRow}>
-                        {/*  isGoal이 true일 때 별 아이콘 표시 */}
                         {b.isGoal && <Ionicons name="star" size={12} color="#0B1220" style={styles.blockIcon} />}
                         <Text style={styles.blockTitle} numberOfLines={1}>{b.purpose ?? "할 일"}</Text>
                       </View>
@@ -453,8 +617,8 @@ export default function PurposeScreen() {
           mode={modalMode!}
           initialData={selectedBlock}
           onClose={closeModal}
-          onSave={handleSave} //  실제 저장 함수 연결
-          onDelete={handleDelete} //  실제 삭제 함수 연결
+          onSave={handleSave}
+          onDelete={handleDelete}
         />
       </Modal>
     </View>
@@ -473,7 +637,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
   const [purpose, setPurpose] = useState(initialData?.purpose || '');
   const [type, setType] = useState(initialData?.type || '개인');
   const [action, setAction] = useState(initialData?.action || '기타');
-  const [isGoal, setIsGoal] = useState(initialData?.isGoal || false); //  목표 할일 여부를 관리하는 상태
+  const [isGoal, setIsGoal] = useState(initialData?.isGoal || false);
   const [startTime, setStartTime] = useState(() => toDateFromMinutes(initialData?.start || 540));
   const [endTime, setEndTime] = useState(() => toDateFromMinutes(initialData?.end || 600));
 
@@ -494,7 +658,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
       purpose,
       type,
       action,
-      isGoal, //  저장 시 목표 상태 전달
+      isGoal,
       start: fromDateToMinutes(startTime),
       end: fromDateToMinutes(endTime),
       color: initialData?.color || randomColor(),
@@ -534,13 +698,10 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
           <View style={styles.newModalHeader}>
             <Text style={styles.modalTitle}>{mode === 'add' ? '할 일 추가' : '할 일 편집'}</Text>
             {mode === 'edit' && (
-               //  헤더 오른쪽 액션 버튼들을 묶는 컨테이너
               <View style={styles.headerActions}>
-                {/*  목표 토글 버튼 */}
                 <TouchableOpacity onPress={() => setIsGoal(prev => !prev)} style={[styles.goalToggleButton, isGoal && styles.goalToggleButtonActive]}>
                   <Text style={[styles.goalToggleButtonText, isGoal && styles.goalToggleButtonTextActive]}>목표</Text>
                 </TouchableOpacity>
-                {/* 기존 삭제 버튼 */}
                 <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
                   <Text style={styles.deleteButtonText}>삭제</Text>
                 </TouchableOpacity>
@@ -681,12 +842,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.1)',
     borderRadius: 10,
   },
-  //  블록 제목과 아이콘을 가로로 배치하기 위한 스타일
   blockTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  //  별 아이콘 오른쪽 여백
   blockIcon: {
     marginRight: 4,
   },
@@ -759,13 +918,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "bold",
   },
-  //  헤더 오른쪽 버튼들을 묶는 컨테이너
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  //  목표 토글 버튼 스타일
   goalToggleButton: {
     backgroundColor: 'transparent',
     borderWidth: 1,
@@ -774,18 +931,15 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
   },
-  //  목표 토글 활성화 시 스타일
   goalToggleButtonActive: {
     backgroundColor: C.primary,
     borderColor: C.primary,
   },
-  //  목표 토글 텍스트 스타일
   goalToggleButtonText: {
     color: C.textDim,
     fontWeight: 'bold',
     fontSize: 14,
   },
-  //  목표 토글 활성화 시 텍스트 스타일
   goalToggleButtonTextActive: {
     color: 'white',
   },
