@@ -223,44 +223,69 @@ export default function PurposeScreen() {
     return () => unsub();
   }, [uid, selectedDate]);
 
-  //  겹치는 블록을 가로 분할 배치
+//  겹치는 블록을 가로 분할 배치
   const blockLayouts = useMemo(() => {
+    // [추가] 시작 시간 기준으로 블록 정렬
     const sortedByTime = [...blocks].sort((a, b) => a.start - b.start);
     if (sortedByTime.length === 0) return new Map();
 
+    // [추가] 최종 레이아웃 정보를 담을 Map
     const layouts = new Map<string, { top: number; height: number; left: string; width: string }>();
-    const processed = new Set<string>();
+    // [추가] 각 블록별로 동시에 최대로 겹치는 블록 수와 자신의 순서(인덱스)를 저장할 Map
+    const blockInfo = new Map<string, { maxOverlap: number, columnIndex: number }>();
 
-    for (const block of sortedByTime) {
-      if (processed.has(block.id)) continue;
-      const group: Block[] = [];
+    // [추가] 모든 블록을 순회하며 각 블록의 최대 겹침 수와 순서 계산
+    for (let i = 0; i < sortedByTime.length; i++) {
+      const currentBlock = sortedByTime[i];
+      let maxOverlap = 1; // 자기 자신 포함
+      const overlappingBlocks: Block[] = [currentBlock]; // 현재 블록과 겹치는 블록들 (자신 포함)
 
-      const findOverlapsRecursive = (b: Block) => {
-        group.push(b);
-        processed.add(b.id);
-        for (const other of sortedByTime) {
-          if (processed.has(other.id)) continue;
-          if (b.end > other.start && b.start < other.end) {
-            findOverlapsRecursive(other);
-          }
+      // [추가] 현재 블록과 겹치는 다른 블록들을 찾음
+      for (let j = 0; j < sortedByTime.length; j++) {
+        if (i === j) continue; // 자기 자신 제외
+        const otherBlock = sortedByTime[j];
+        // 시간이 겹치는지 확인 (끝나는 시간은 겹치지 않는 것으로 간주)
+        if (currentBlock.end > otherBlock.start && currentBlock.start < otherBlock.end) {
+          overlappingBlocks.push(otherBlock);
         }
-      };
-      findOverlapsRecursive(block);
+      }
 
-      const groupSortedByDuration = group.sort((a, b) => (a.end - a.start) - (b.end - b.start));
-      const totalColumns = groupSortedByDuration.length;
-
-      groupSortedByDuration.forEach((b, colIndex) => {
-        layouts.set(b.id, {
-          top: (b.start / 60) * HOUR_HEIGHT,
-          height: ((b.end - b.start) / 60) * HOUR_HEIGHT,
-          left: `${(100 / totalColumns) * colIndex}%`,
-          width: `${100 / totalColumns}%`,
-        });
+      // [추가] 겹치는 블록들을 시작 시간 순서로 정렬 (시작 시간 같으면 id로 정렬하여 일관성 유지)
+      overlappingBlocks.sort((a, b) => {
+        if (a.start !== b.start) {
+          return a.start - b.start;
+        }
+        return a.id.localeCompare(b.id);
       });
+
+      // [추가] 현재 블록이 겹치는 블록들 중에서 몇 번째인지(columnIndex) 찾음
+      const columnIndex = overlappingBlocks.findIndex(b => b.id === currentBlock.id);
+
+      // [추가] 현재 블록이 지속되는 동안 *동시에* 최대로 겹치는 블록의 수를 계산
+      // (단순화: 여기서는 우선 겹치는 그룹 내 총 블록 수를 사용. 더 정확한 계산은 복잡해짐)
+      maxOverlap = overlappingBlocks.length;
+
+      // [추가] 계산된 정보를 Map에 저장
+      blockInfo.set(currentBlock.id, { maxOverlap, columnIndex });
     }
-    return layouts;
-  }, [blocks]);
+
+    // [추가] 저장된 정보를 바탕으로 최종 레이아웃(top, height, left, width) 계산
+    for (const block of sortedByTime) {
+      const info = blockInfo.get(block.id);
+      if (info) {
+        const { maxOverlap, columnIndex } = info;
+        layouts.set(block.id, {
+          top: (block.start / 60) * HOUR_HEIGHT,
+          height: ((block.end - block.start) / 60) * HOUR_HEIGHT,
+          // [추가] left와 width 계산 방식 변경
+          left: `${(100 / maxOverlap) * columnIndex}%`,
+          width: `${100 / maxOverlap}%`,
+        });
+      }
+    }
+
+    return layouts; // 계산된 레이아웃 Map 반환
+  }, [blocks]); // blocks 배열이 변경될 때만 이 로직 재실행
 
   //  상단 좌상단 백버튼
   const goBack = () => {
