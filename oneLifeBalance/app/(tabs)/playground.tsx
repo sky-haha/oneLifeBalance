@@ -387,7 +387,7 @@ export default function PlaygroundScreen() {
 
     const pieColors = ['#F97316', '#8B5CF6', '#D97706', '#10B981', '#EF4444', '#FCD34D', '#9CA3AF']; // 사용할 색상들
     const dataForLegend: { label: string; color: string; value: number }[] = [];
-    const slices: JSX.Element[] = [];
+    const slices: React.ReactElement[] = [];
     let cumulativeAngle = -90; // 12시 방향에서 시작
 
     mockData.forEach((sliceData, index) => {
