@@ -47,6 +47,7 @@ const C = {
   textDim: "#9CA3AF",
   primary: "#3B82F6",
   danger: "#EF4444",
+  secondary: "#10B981", // 자동 생성 버튼 색상
 };
 
 // 시간표 UI 배치 관련
@@ -225,22 +226,22 @@ export default function PurposeScreen() {
 
 //  겹치는 블록을 가로 분할 배치
   const blockLayouts = useMemo(() => {
-    // [추가] 시작 시간 기준으로 블록 정렬
+    //  시작 시간 기준으로 블록 정렬
     const sortedByTime = [...blocks].sort((a, b) => a.start - b.start);
     if (sortedByTime.length === 0) return new Map();
 
-    // [추가] 최종 레이아웃 정보를 담을 Map
+    //  최종 레이아웃 정보를 담을 Map
     const layouts = new Map<string, { top: number; height: number; left: string; width: string }>();
-    // [추가] 각 블록별로 동시에 최대로 겹치는 블록 수와 자신의 순서(인덱스)를 저장할 Map
+    //  각 블록별로 동시에 최대로 겹치는 블록 수와 자신의 순서(인덱스)를 저장할 Map
     const blockInfo = new Map<string, { maxOverlap: number, columnIndex: number }>();
 
-    // [추가] 모든 블록을 순회하며 각 블록의 최대 겹침 수와 순서 계산
+    //  모든 블록을 순회하며 각 블록의 최대 겹침 수와 순서 계산
     for (let i = 0; i < sortedByTime.length; i++) {
       const currentBlock = sortedByTime[i];
       let maxOverlap = 1; // 자기 자신 포함
       const overlappingBlocks: Block[] = [currentBlock]; // 현재 블록과 겹치는 블록들 (자신 포함)
 
-      // [추가] 현재 블록과 겹치는 다른 블록들을 찾음
+      //  현재 블록과 겹치는 다른 블록들을 찾음
       for (let j = 0; j < sortedByTime.length; j++) {
         if (i === j) continue; // 자기 자신 제외
         const otherBlock = sortedByTime[j];
@@ -250,7 +251,7 @@ export default function PurposeScreen() {
         }
       }
 
-      // [추가] 겹치는 블록들을 시작 시간 순서로 정렬 (시작 시간 같으면 id로 정렬하여 일관성 유지)
+      //  겹치는 블록들을 시작 시간 순서로 정렬 (시작 시간 같으면 id로 정렬하여 일관성 유지)
       overlappingBlocks.sort((a, b) => {
         if (a.start !== b.start) {
           return a.start - b.start;
@@ -258,18 +259,18 @@ export default function PurposeScreen() {
         return a.id.localeCompare(b.id);
       });
 
-      // [추가] 현재 블록이 겹치는 블록들 중에서 몇 번째인지(columnIndex) 찾음
+      //  현재 블록이 겹치는 블록들 중에서 몇 번째인지(columnIndex) 찾음
       const columnIndex = overlappingBlocks.findIndex(b => b.id === currentBlock.id);
 
-      // [추가] 현재 블록이 지속되는 동안 *동시에* 최대로 겹치는 블록의 수를 계산
+      //  현재 블록이 지속되는 동안 *동시에* 최대로 겹치는 블록의 수를 계산
       // (단순화: 여기서는 우선 겹치는 그룹 내 총 블록 수를 사용. 더 정확한 계산은 복잡해짐)
       maxOverlap = overlappingBlocks.length;
 
-      // [추가] 계산된 정보를 Map에 저장
+      //  계산된 정보를 Map에 저장
       blockInfo.set(currentBlock.id, { maxOverlap, columnIndex });
     }
 
-    // [추가] 저장된 정보를 바탕으로 최종 레이아웃(top, height, left, width) 계산
+    //  저장된 정보를 바탕으로 최종 레이아웃(top, height, left, width) 계산
     for (const block of sortedByTime) {
       const info = blockInfo.get(block.id);
       if (info) {
@@ -277,7 +278,7 @@ export default function PurposeScreen() {
         layouts.set(block.id, {
           top: (block.start / 60) * HOUR_HEIGHT,
           height: ((block.end - block.start) / 60) * HOUR_HEIGHT,
-          // [추가] left와 width 계산 방식 변경
+          //  left와 width 계산 방식 변경
           left: `${(100 / maxOverlap) * columnIndex}%`,
           width: `${100 / maxOverlap}%`,
         });
@@ -296,6 +297,18 @@ export default function PurposeScreen() {
   //  모달: 추가/편집 모드 및 선택 블록
   const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<Block | null>(null);
+  //  자동 생성 모달 상태
+  const [isAutoModalVisible, setIsAutoModalVisible] = useState(false);
+  //  자동 생성 모달 내부 상태
+  const [autoType, setAutoType] = useState('개인');
+  const [autoAction, setAutoAction] = useState('기타');
+  const [autoPickerState, setAutoPickerState] = useState<{
+    visible: boolean;
+    title: string;
+    items: string[];
+    onSelect: (item: string) => void;
+  }>({ visible: false, title: '', items: [], onSelect: () => {} });
+
 
   const openAddModal = () => {
     setSelectedBlock(null);
@@ -309,6 +322,20 @@ export default function PurposeScreen() {
     setModalMode(null);
     setSelectedBlock(null);
   };
+  //  자동 생성 모달 열기/닫기
+  const openAutoModal = () => setIsAutoModalVisible(true);
+  const closeAutoModal = () => setIsAutoModalVisible(false);
+  //  자동 생성 모달 피커 열기
+  const openAutoPicker = (title: string, items: string[], onSelect: (item: string) => void) => {
+    setAutoPickerState({ visible: true, title, items, onSelect });
+  };
+  //  자동 생성 모달 저장 핸들러 (임시)
+  const handleAutoGenerate = () => {
+    console.log("자동 생성:", { type: autoType, action: autoAction });
+    // TODO: 자동 생성 로직 구현
+    closeAutoModal();
+  };
+
 
   // [MOD] 저장/삭제 핸들러: 로컬 반영 + 서버 반영
   const handleSave = async (newBlock: Block) => {
@@ -630,10 +657,19 @@ export default function PurposeScreen() {
         </View>
       </ScrollView>
 
-      {/* 버튼 */}
-      <TouchableOpacity style={styles.fab} activeOpacity={0.9} onPress={openAddModal}>
-        <Text style={styles.fabText}>＋</Text>
-      </TouchableOpacity>
+      {/* 버튼들을 감싸는 컨테이너 */}
+      <View style={styles.fabContainer}>
+         {/* 일정 자동 생성 버튼 */}
+         <TouchableOpacity style={styles.autoFab} activeOpacity={0.9} onPress={openAutoModal}>
+            <Text style={styles.fabText}>!</Text>
+         </TouchableOpacity>
+
+         {/* 기존 할 일 추가 버튼 */}
+         <TouchableOpacity style={styles.fab} activeOpacity={0.9} onPress={openAddModal}>
+           <Text style={styles.fabText}>＋</Text>
+         </TouchableOpacity>
+      </View>
+
 
       {/* 추가/편집 모달 */}
       <Modal visible={modalMode !== null} transparent animationType="fade" onRequestClose={closeModal}>
@@ -646,6 +682,71 @@ export default function PurposeScreen() {
           onDelete={handleDelete}
         />
       </Modal>
+
+      {/*  일정 자동 생성 모달 */}
+      <Modal visible={isAutoModalVisible} transparent animationType="fade" onRequestClose={closeAutoModal}>
+         {/*  NewModalBody와 유사한 구조 사용 */}
+         <View style={styles.backdrop}>
+           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalContainer}>
+             <View style={styles.modalCard}>
+               {/* 모달 헤더 */}
+               <View style={styles.newModalHeader}>
+                 <Text style={styles.modalTitle}>일정 자동 생성</Text>
+                 {/* 필요시 여기에 다른 액션 추가 가능 */}
+               </View>
+
+               {/* 할일 유형(커스텀 피커) */}
+               <Text style={styles.label}>할일 유형</Text>
+               <TouchableOpacity style={styles.pickerButton} onPress={() => openAutoPicker('할일 유형 선택', TYPES, setAutoType)}>
+                 <Text style={styles.pickerButtonText}>{autoType}</Text>
+               </TouchableOpacity>
+
+               {/* 행동 유형(커스텀 피커) */}
+               <Text style={styles.label}>행동 유형</Text>
+               <TouchableOpacity style={styles.pickerButton} onPress={() => openAutoPicker('행동 유형 선택', ACTIONS, setAutoAction)}>
+                 <Text style={styles.pickerButtonText}>{autoAction}</Text>
+               </TouchableOpacity>
+
+               {/* 하단 버튼 */}
+               <View style={styles.footerRow}>
+                 <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={closeAutoModal}>
+                   <Text style={styles.btnGhostText}>취소</Text>
+                 </TouchableOpacity>
+                 <TouchableOpacity style={[styles.btn, {backgroundColor: C.secondary}]} onPress={handleAutoGenerate}>
+                   <Text style={styles.btnPrimaryText}>생성</Text>
+                 </TouchableOpacity>
+               </View>
+             </View>
+           </KeyboardAvoidingView>
+
+           {/* 자동 생성용 커스텀 피커 모달 */}
+           <Modal
+             transparent={true}
+             visible={autoPickerState.visible}
+             animationType="fade"
+             onRequestClose={() => setAutoPickerState({ ...autoPickerState, visible: false })}
+           >
+             <TouchableOpacity style={styles.pickerBackdrop} onPress={() => setAutoPickerState({ ...autoPickerState, visible: false })}>
+               <View style={styles.pickerContainer}>
+                 <Text style={styles.pickerTitle}>{autoPickerState.title}</Text>
+                 {autoPickerState.items.map(item => (
+                   <TouchableOpacity
+                     key={item}
+                     style={styles.pickerItem}
+                     onPress={() => {
+                       autoPickerState.onSelect(item);
+                       setAutoPickerState({ ...autoPickerState, visible: false });
+                     }}
+                   >
+                     <Text style={styles.pickerItemText}>{item}</Text>
+                   </TouchableOpacity>
+                 ))}
+               </View>
+             </TouchableOpacity>
+           </Modal>
+         </View>
+      </Modal>
+
     </View>
   );
 }
@@ -893,10 +994,13 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
   },
-  fab: {
+  fabContainer: {
     position: "absolute",
     right: 16,
     bottom: 22,
+    alignItems: 'center', // 버튼들을 세로 중앙 정렬 (필요하다면)
+  },
+  fab: {
     width: 56,
     height: 56,
     borderRadius: 28,
@@ -906,6 +1010,16 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   fabText: { color: "#0B1220", fontSize: 26, fontWeight: "800", marginTop: -2 },
+  autoFab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28, 
+    backgroundColor: C.secondary, 
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+    marginBottom: 12, 
+  },
   handleTop: {
     position: "absolute", top: 0, left: 0, right: 0, height: 28, marginTop: -8, justifyContent: "center", alignItems: "center", zIndex: 3,
   },
@@ -925,7 +1039,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   modalCard: {
-    width: '100%',
+    width: '100%', // 너비 조정
     backgroundColor: C.card,
     borderRadius: 16,
     padding: 20,
@@ -1029,7 +1143,7 @@ const styles = StyleSheet.create({
   btnGhostText: { color: C.text, fontWeight: "700" },
   btnPrimary: { backgroundColor: C.primary },
   btnPrimaryText: { color: "#FFF", fontWeight: "bold" },
-  
+
   pickerBackdrop: {
     flex: 1,
     justifyContent: 'center',
