@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -125,6 +125,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const [isCalendarVisible, setIsCalendarVisible] = useState(false);
   const [selectingStartDate, setSelectingStartDate] = useState(true);
+
+  // 모달이 열릴 때마다 내부 상태를 initialSettings로 리셋
+  useEffect(() => {
+    if (isVisible) {
+      setShowGraph(initialSettings.showGraph);
+      setShowAvgTime(initialSettings.showAvgTime);
+      setGraphCategory(initialSettings.graphCategory);
+      setAvgTimeItems(initialSettings.avgTimeItems);
+      setDateRange(initialSettings.dateRange);
+      setSelectingStartDate(true);
+      setIsCalendarVisible(false);
+    }
+  }, [isVisible, initialSettings]);
 
   // 토글 버튼 핸들러
   const toggleAvgTimeItem = useCallback(
@@ -351,6 +364,15 @@ export default function PlaygroundScreen() {
   });
   const [isModalVisible, setIsModalVisible] = useState(false); // 설정 모달 표시 여부
 
+  // 모달을 항상 '빈 기본값'으로 시작시키기 위한 상수
+  const EMPTY_MODAL_SETTINGS: PlaygroundSettings = {
+    showGraph: false,
+    showAvgTime: false,
+    graphCategory: null,
+    avgTimeItems: [],
+    dateRange: {},
+  };
+
   // 설정 저장 핸들러
   const handleSaveSettings = (newSettings: PlaygroundSettings) => {
     setSettings(newSettings);
@@ -510,7 +532,10 @@ export default function PlaygroundScreen() {
         <TouchableOpacity style={styles.recommendButton}>
           <Text style={styles.recommendButtonText}>추천 고정시간 패턴</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.addButton} onPress={() => setIsModalVisible(true)}>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => setIsModalVisible(true)}
+        >
           <Ionicons name="add" size={32} color="white" />
         </TouchableOpacity>
       </View>
@@ -520,7 +545,7 @@ export default function PlaygroundScreen() {
         isVisible={isModalVisible}
         onClose={() => setIsModalVisible(false)}
         onSave={handleSaveSettings}
-        initialSettings={settings}
+        initialSettings={EMPTY_MODAL_SETTINGS} //항상 빈 기본값으로 시작
       />
     </SafeAreaView>
   );
