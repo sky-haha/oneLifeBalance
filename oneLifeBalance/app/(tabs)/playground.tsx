@@ -11,32 +11,35 @@ import {
   Switch,
 } from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
-import Svg, { Path, Circle } from 'react-native-svg'; 
+import Svg, { Path, Circle } from 'react-native-svg';
 
+//
 const TYPES = ['휴식', '가족', '개인', '자기개발', '이동', '식사'];
 const ACTIONS = ['수면', '노동', '수업', '운동', '오락', '기타'];
 
+// 색상 팔레트
 const C = {
-  background: '#FFFFFF',     
-  card: '#F9FAFB',          
-  text: '#111827',           
+  background: '#FFFFFF',       
+  card: '#F9FAFB',
+  text: '#111827',        
   textDim: '#6B7280',     
   primary: '#3B82F6',     
-  border: '#E5E7EB',     
+  border: '#E5E7EB',          
   closeButton: '#9CA3AF',    
   closeButtonIcon: '#FFFFFF', 
-  modalBackground: '#FFFFFF',  
-  modalText: '#111827',       
-  modalBorder: '#D1D5DB',      
-  activeToggle: '#D1FAE5',  
+  modalBackground: '#FFFFFF',   
+  modalText: '#111827',      
+  modalBorder: '#D1D5DB',       
+  activeToggle: '#D1FAE5',     
   activeToggleText: '#065F46', 
   inactiveToggle: '#F3F4F6',   
-  inactiveToggleText: '#4B5563',
+  inactiveToggleText: '#4B5563', 
 };
 
-// 그래프 영역 크기 
+//그래프 영역 크기 상수 값 증가
 const GRAPH_SIZE = 250;
-// 날짜 차이 계산 함수
+
+// 날짜 차이 계산
 const dayDiff = (start?: string, end?: string): number => {
   if (!start || !end) return 0;
   const startDate = new Date(start);
@@ -57,10 +60,10 @@ const formatMinutes = (totalMinutes: number): string => {
   if (minutes > 0) {
     result += `${minutes}분`;
   }
-  return result.trim();
+  return result.trim() || "0분"; // 빈 문자열일 경우 "0분" 반환
 };
 
-// 원형 그래프의 한 조각(Path)을 그리는 SVG
+// 원형 그래프의 한 조각(Path)을 그리는 SVG 헬퍼 함수
 const createPieSlicePath = (
   cx: number, cy: number, radius: number, startAngle: number, endAngle: number
 ): string => {
@@ -68,6 +71,7 @@ const createPieSlicePath = (
   const startRad = (startAngle - 90) * Math.PI / 180;
   const endRad = (endAngle - 90) * Math.PI / 180;
 
+  // 시작점과 끝점 좌표 계산
   const start = {
     x: cx + radius * Math.cos(startRad),
     y: cy + radius * Math.sin(startRad)
@@ -76,6 +80,7 @@ const createPieSlicePath = (
     x: cx + radius * Math.cos(endRad),
     y: cy + radius * Math.sin(endRad)
   };
+  // 호가 180도를 초과하는지 여부 (SVG arc 파라미터)
   const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
   // 호 그리기: M(시작점 이동) A(타원 호 그리기) L(중심으로 선) Z(닫기)
   const d = [
@@ -95,13 +100,12 @@ interface SettingsModalProps {
   initialSettings: PlaygroundSettings;
 }
 
-//설정 값들의 타입을 정의
+// 설정 값 타입 정의 변경
 interface PlaygroundSettings {
   showGraph: boolean;
   showAvgTime: boolean;
-  graphTypes: string[];
-  graphActions: string[];
-  avgTimeItems: string[];
+  graphCategory: 'type' | 'action' | null; // 그래프 기준: 'type', 'action', 또는 선택 안 함
+  avgTimeItems: string[]; // 평균 시간 계산에 사용될 TYPES + ACTIONS
   dateRange: { start?: string; end?: string };
 }
 
@@ -111,42 +115,34 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   onSave,
   initialSettings,
 }) => {
-  // 모달 내부 상태
+  // 모달 내부 상태 관리
   const [showGraph, setShowGraph] = useState(initialSettings.showGraph);
   const [showAvgTime, setShowAvgTime] = useState(initialSettings.showAvgTime);
-  const [graphTypes, setGraphTypes] = useState<string[]>(initialSettings.graphTypes);
-  const [graphActions, setGraphActions] = useState<string[]>(initialSettings.graphActions);
+  // graphTypes, graphActions 대신 graphCategory 상태 추가
+  const [graphCategory, setGraphCategory] = useState<'type' | 'action' | null>(initialSettings.graphCategory);
   const [avgTimeItems, setAvgTimeItems] = useState<string[]>(initialSettings.avgTimeItems);
   const [dateRange, setDateRange] = useState(initialSettings.dateRange);
 
   const [isCalendarVisible, setIsCalendarVisible] = useState(false);
   const [selectingStartDate, setSelectingStartDate] = useState(true);
 
-// 토글 버튼 핸들러 (여러 상태를 업데이트하기 위해 useCallback 사용)
-  const toggleSelection = useCallback(
-    (item: string, listType: 'graphTypes' | 'graphActions' | 'avgTimeItems') => {
-      const listMap = {
-        graphTypes: graphTypes, // 상태 값
-        graphActions: graphActions, // 상태 값
-        avgTimeItems: avgTimeItems, // 상태 값
-      };
-      const setListMap = {
-        graphTypes: setGraphTypes, // 설정 함수
-        graphActions: setGraphActions, // 설정 함수
-        avgTimeItems: setAvgTimeItems, // 설정 함수
-      };
-
-      const currentList = listMap[listType]; // 현재 상태 배열 가져오기
-      const setList = setListMap[listType];   // 해당 상태 설정 함수 가져오기
-
-      setList((prevList: string[]) =>
+  // 토글 버튼 핸들러
+  const toggleAvgTimeItem = useCallback(
+    (item: string) => {
+      setAvgTimeItems((prevList: string[]) => // 타입 명시
         prevList.includes(item)
-          ? prevList.filter((i: string) => i !== item)
+          ? prevList.filter((i: string) => i !== item) // 타입 명시
           : [...prevList, item]
       );
     },
-    [graphTypes, graphActions, avgTimeItems] // 의존성 배열 유지
+    []
   );
+
+   // 그래프 카테고리 선택 핸들러
+  const selectGraphCategory = (category: 'type' | 'action') => {
+    // 이미 선택된 것을 다시 누르면 선택 해제
+    setGraphCategory(prev => prev === category ? null : category);
+  };
 
   // 캘린더 날짜 선택 핸들러
   const handleDayPress = (day: DateData) => {
@@ -167,7 +163,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // 저장 버튼 핸들러
   const handleSave = () => {
-    onSave({ showGraph, showAvgTime, graphTypes, graphActions, avgTimeItems, dateRange });
+    // graphCategory 저장
+    onSave({ showGraph, showAvgTime, graphCategory, avgTimeItems, dateRange });
     onClose();
   };
 
@@ -193,50 +190,74 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           <ScrollView>
             <Text style={styles.modalTitle}>표시 설정</Text>
 
-            {/* 그래프 / 평균 시간 토글 */}
+            {/* 그래프평균 시간 토글 */}
             <View style={styles.modalSection}>
               <View style={styles.modalToggleRow}>
                 <Text style={styles.modalLabel}>시간 소비 그래프 표시</Text>
-                <Switch value={showGraph} onValueChange={setShowGraph} trackColor={{ false: C.border, true: C.primary }} thumbColor={C.background} />
+                {/* onValueChange 핸들러 수정 */}
+                <Switch
+                  value={showGraph}
+                  onValueChange={(newValue) => {
+                    setShowGraph(newValue);
+                    if (newValue) {
+                      setShowAvgTime(false); // 그래프 켜면 평균 시간 끄기
+                    } else {
+                      setGraphCategory(null); // 그래프 끄면 카테고리 선택 해제
+                    }
+                  }}
+                  trackColor={{ false: C.border, true: C.primary }}
+                  thumbColor={C.background}
+                />
               </View>
               <View style={styles.modalToggleRow}>
                 <Text style={styles.modalLabel}>평균 소비 시간 표시</Text>
-                <Switch value={showAvgTime} onValueChange={setShowAvgTime} trackColor={{ false: C.border, true: C.primary }} thumbColor={C.background} />
+                 {/* onValueChange 핸들러 수정 */}
+                <Switch
+                  value={showAvgTime}
+                   onValueChange={(newValue) => {
+                       setShowAvgTime(newValue);
+                       if (newValue) { //  평균 시간 켜면 그래프 끄기
+                          setShowGraph(false);
+                          setGraphCategory(null); //  그래프 카테고리 해제
+                       } else {
+                           setAvgTimeItems([]); //  평균 시간 끄면 선택 항목 초기화
+                       }
+                   }}
+                  trackColor={{ false: C.border, true: C.primary }}
+                  thumbColor={C.background}
+                />
               </View>
             </View>
 
-            {/*  그래프 설정 */}
+            {/* 그래프 설정 */}
             {showGraph && (
               <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>그래프 포함 항목</Text>
-                <Text style={styles.modalSubtitle}>할 일 유형</Text>
+                <Text style={styles.modalSectionTitle}>그래프 기준 선택</Text>
+                {/*  단일 선택 토글 버튼으로 변경 */}
                 <View style={styles.toggleContainer}>
-                  {TYPES.map(type => (
-                    <TouchableOpacity
-                      key={type}
-                      style={[styles.toggleButton, graphTypes.includes(type) ? styles.toggleButtonActive : styles.toggleButtonInactive]}
-                      onPress={() => toggleSelection(type, 'graphTypes')}
-                    >
-                      <Text style={graphTypes.includes(type) ? styles.toggleTextActive : styles.toggleTextInactive}>{type}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={[styles.modalSubtitle, { marginTop: 10 }]}>행동 유형</Text>
-                <View style={styles.toggleContainer}>
-                  {ACTIONS.map(action => (
-                    <TouchableOpacity
-                      key={action}
-                      style={[styles.toggleButton, graphActions.includes(action) ? styles.toggleButtonActive : styles.toggleButtonInactive]}
-                      onPress={() => toggleSelection(action, 'graphActions')}
-                    >
-                      <Text style={graphActions.includes(action) ? styles.toggleTextActive : styles.toggleTextInactive}>{action}</Text>
-                    </TouchableOpacity>
-                  ))}
+                  <TouchableOpacity
+                    style={[
+                      styles.toggleButton,
+                      graphCategory === 'type' ? styles.toggleButtonActive : styles.toggleButtonInactive
+                    ]}
+                    onPress={() => selectGraphCategory('type')}
+                  >
+                    <Text style={graphCategory === 'type' ? styles.toggleTextActive : styles.toggleTextInactive}>할 일 유형 기준</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.toggleButton,
+                       graphCategory === 'action' ? styles.toggleButtonActive : styles.toggleButtonInactive
+                    ]}
+                    onPress={() => selectGraphCategory('action')}
+                  >
+                    <Text style={graphCategory === 'action' ? styles.toggleTextActive : styles.toggleTextInactive}>행동 유형 기준</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             )}
 
-            {/*평균 시간 설정 */}
+            {/*평균 시간 설정  */}
             {showAvgTime && (
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>평균 시간 계산 항목</Text>
@@ -246,7 +267,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                      <TouchableOpacity
                        key={`avg-${type}`} // 키 중복 방지
                        style={[styles.toggleButton, avgTimeItems.includes(type) ? styles.toggleButtonActive : styles.toggleButtonInactive]}
-                       onPress={() => toggleSelection(type, 'avgTimeItems')}
+                       //  toggleAvgTimeItem 사용
+                       onPress={() => toggleAvgTimeItem(type)}
                      >
                        <Text style={avgTimeItems.includes(type) ? styles.toggleTextActive : styles.toggleTextInactive}>{type}</Text>
                      </TouchableOpacity>
@@ -258,7 +280,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                      <TouchableOpacity
                        key={`avg-${action}`} // 키 중복 방지
                        style={[styles.toggleButton, avgTimeItems.includes(action) ? styles.toggleButtonActive : styles.toggleButtonInactive]}
-                       onPress={() => toggleSelection(action, 'avgTimeItems')}
+                       //  toggleAvgTimeItem 사용
+                       onPress={() => toggleAvgTimeItem(action)}
                      >
                        <Text style={avgTimeItems.includes(action) ? styles.toggleTextActive : styles.toggleTextInactive}>{action}</Text>
                      </TouchableOpacity>
@@ -267,7 +290,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </View>
             )}
 
-            {/*  날짜 설정 */}
+            {/*날짜 설정 */}
             <View style={styles.modalSection}>
               <Text style={styles.modalSectionTitle}>날짜 설정 (최소 7일)</Text>
               <TouchableOpacity style={styles.datePickerButton} onPress={() => setIsCalendarVisible(true)}>
@@ -275,7 +298,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </TouchableOpacity>
             </View>
 
-            {/*저장 / 취소 버튼*/}
+            {/* 저장 / 취소 버튼*/}
             <View style={styles.modalFooter}>
               <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={onClose}>
                 <Text style={styles.cancelButtonText}>취소</Text>
@@ -286,7 +309,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             </View>
           </ScrollView>
 
-          {/* 캘린더 모달  */}
+          {/*캘린더 모달 */}
           <Modal
             visible={isCalendarVisible}
             transparent={true}
@@ -317,16 +340,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 };
 
 
-// 메인 화면 컴포넌트
+// 메인 화면
 export default function PlaygroundScreen() {
-  // 메인 화면 상태 관리 
   const [settings, setSettings] = useState<PlaygroundSettings>({
-    showGraph: true, 
-    showAvgTime: true, 
-    graphTypes: ['자기개발', '노동'], 
-    graphActions: ['운동'],       
+    showGraph: true,
+    showAvgTime: false, 
+    graphCategory: 'type', 
     avgTimeItems: ['수면', '노동'], 
-    dateRange: {},         
+    dateRange: {},           
   });
   const [isModalVisible, setIsModalVisible] = useState(false); // 설정 모달 표시 여부
 
@@ -335,50 +356,96 @@ export default function PlaygroundScreen() {
     setSettings(newSettings);
   };
 
-  // 날짜 유효성
+  // 날짜 유효성 검사
   const isDateRangeValid = settings.dateRange.start && settings.dateRange.end && dayDiff(settings.dateRange.start, settings.dateRange.end) >= 7;
 
-  // 메인화면 임시데이터
-  // 그래프 데이터
-  const pieSlices = useMemo(() => {
-    if (!settings.showGraph || !isDateRangeValid || (settings.graphTypes.length === 0 && settings.graphActions.length === 0)) {
-      return null;
+  // 메인 화면 임시데이터
+  //  그래프 데이터 계산
+  const graphData = useMemo(() => {
+    //  graphCategory 확인 조건 추가
+    if (!settings.showGraph || !isDateRangeValid || !settings.graphCategory) {
+      return null; // 그래프 숨김 또는 기준 미선택
     }
+
     // 임시 데이터
-    const mockPieData = [ { value: 60, color: '#F97316' }, { value: 40, color: '#8B5CF6' } ];
-    let cumulativeAngle = -90;
-    return mockPieData.map((slice, index) => {
-      const angle = (slice.value / 100) * 360;
-      const path = createPieSlicePath(50, 50, 40, cumulativeAngle, cumulativeAngle + angle);
+    let mockData: { label: string; value: number }[] = [];
+    if (settings.graphCategory === 'type') {
+      // Types 기준
+      mockData = [
+        { label: '자기개발', value: 60 },
+        { label: '노동', value: 25 },
+        { label: '식사', value: 15 },
+      ];
+    } else if (settings.graphCategory === 'action') {
+      // ctions 기준
+      mockData = [
+        { label: '운동', value: 40 },
+        { label: '수면', value: 30 },
+        { label: '오락', value: 30 },
+      ];
+    }
+
+    const pieColors = ['#F97316', '#8B5CF6', '#D97706', '#10B981', '#EF4444', '#FCD34D', '#9CA3AF']; // 사용할 색상들
+    const dataForLegend: { label: string; color: string; value: number }[] = [];
+    const slices: JSX.Element[] = [];
+    let cumulativeAngle = -90; // 12시 방향에서 시작
+
+    mockData.forEach((sliceData, index) => {
+      if (sliceData.value <= 0) return; // 값이 0 이하면 그래프 및 범례에 포함 안 함
+
+      const angle = (sliceData.value / 100) * 360;
+      const color = pieColors[index % pieColors.length]; // 색상 순환 할당
+      const path = createPieSlicePath(50, 50, 40, cumulativeAngle, cumulativeAngle + angle); // SVG viewBox 기준 (0,0) ~ (100,100)
       cumulativeAngle += angle;
-      return <Path key={index} d={path} fill={slice.color} />;
+
+      slices.push(<Path key={index} d={path} fill={color} />);
+      dataForLegend.push({ ...sliceData, color }); // 범례용 데이터 저장
     });
-  }, [settings.showGraph, settings.graphTypes, settings.graphActions, settings.dateRange, isDateRangeValid]);
+
+    if (slices.length === 0) return null; // 그릴 조각이 없으면 null 반환
+
+    return { slices, dataForLegend }; //  슬라이스와 범례 데이터 함께 반환
+
+    //  의존성 배열에 graphCategory 추가
+  }, [settings.showGraph, settings.graphCategory, settings.dateRange, isDateRangeValid]);
 
   // 평균 시간 데이터
   const averageTimeCards = useMemo(() => {
     if (!settings.showAvgTime || !isDateRangeValid || settings.avgTimeItems.length === 0) {
-      return []; 
+      return []; // 평균 시간 카드 숨김 또는 선택 항목 없음
     }
     // 임시 데이터
-    const mockAvgTimes: { [key: string]: number } = { 
-      '수면': 420, '노동': 480, '운동': 90, '식사': 60
+    const mockAvgTimes: { [key: string]: number } = { // 분 단위 평균
+      //  모든 TYPES와 ACTIONS에 대한 목업 데이터
+      '휴식': 120, '가족': 45, '개인': 30, '자기개발': 150, '이동': 20, '식사': 60,
+      '수면': 420, '노동': 480, '수업': 180, '운동': 90, '오락': 75, '기타': 10
     };
     return settings.avgTimeItems
       .filter(item => mockAvgTimes[item] !== undefined) 
       .map(item => ({
-        label: `평균 ${item}시간`,
+        label: `평균 ${item} 시간`, //  '시간' 텍스트 추가하여 통일성
         value: formatMinutes(mockAvgTimes[item]),
+        key: item, //  map key용 고유값
       }));
   }, [settings.showAvgTime, settings.avgTimeItems, settings.dateRange, isDateRangeValid]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
-        {/* --- 평균 소비 시간 카드 --- */}
-        {settings.showAvgTime && isDateRangeValid && averageTimeCards.map((card, index) => (
-          <View style={styles.card} key={`avg-${index}`}>
-             {/*설정은 모달에서 */}
+        {/*평균 소비 시간 */}
+        {settings.showAvgTime && isDateRangeValid && averageTimeCards.map((card) => ( //  key prop 사용
+          <View style={styles.card} key={card.key}>
+            {/*  닫기 버튼 */}
+            <TouchableOpacity
+              style={styles.closeButton}
+              //  버튼 누르면 해당 item을 avgTimeItems 배열에서 제거하고 저장
+              onPress={() => {
+                const updatedItems = settings.avgTimeItems.filter(item => item !== card.key);
+                setSettings(prev => ({ ...prev, avgTimeItems: updatedItems }));
+              }}
+            >
+              <Ionicons name="close" size={16} color={C.closeButtonIcon} />
+            </TouchableOpacity>
             <Text style={styles.cardText}>
               {card.label}: <Text style={styles.boldText}>{card.value}</Text>
             </Text>
@@ -394,23 +461,44 @@ export default function PlaygroundScreen() {
          )}
 
 
-        {/* 시간 소비 그래프 카드 */}
-        {settings.showGraph && isDateRangeValid && pieSlices && (
+        {/* 시간 소비 그래프*/}
+        {/*  graphData에서 slices 가져와 사용 */}
+        {settings.showGraph && isDateRangeValid && graphData?.slices && (
           <View style={[styles.card, styles.graphCard]}>
-            {/* 닫기 버튼 제거 */}
+            {/*  닫기 버튼 */}
+            <TouchableOpacity
+              style={styles.closeButton}
+              //  버튼 누르면 settings의 showGraph를 false로 업데이트
+              onPress={() => setSettings(prev => ({ ...prev, showGraph: false }))}
+            >
+              <Ionicons name="close" size={16} color={C.closeButtonIcon} />
+            </TouchableOpacity>
             <View style={styles.graphContainer}>
               <Svg height="100%" width="100%" viewBox="0 0 100 100">
-                {pieSlices}
+                {graphData.slices}
               </Svg>
             </View>
-            <Text style={[styles.cardText, { marginTop: 10 }]}>시간 소비 그래프</Text>
+            {/*  그래프 카드 제목에 기준 표시 */}
+            <Text style={[styles.cardText, { marginTop: 10 }]}>시간 소비 그래프 ({settings.graphCategory === 'type' ? '할 일 유형' : '행동 유형'} 기준)</Text>
+
+            {/*  범례 섹션 */}
+            {graphData.dataForLegend && graphData.dataForLegend.length > 0 && (
+               <View style={styles.legendContainer}>
+                 {graphData.dataForLegend.map((item, index) => (
+                   <View key={`legend-${index}`} style={styles.legendItem}>
+                     <View style={[styles.legendColorBox, { backgroundColor: item.color }]} />
+                     <Text style={styles.legendText}>{item.label}</Text>
+                   </View>
+                 ))}
+               </View>
+            )}
           </View>
         )}
          {/* 그래프 비활성화 또는 미선택 시 안내 */}
-         {settings.showGraph && (!isDateRangeValid || !pieSlices) && (
+         {settings.showGraph && (!isDateRangeValid || !graphData?.slices || !settings.graphCategory) && (
              <View style={[styles.card, styles.disabledCard]}>
                  <Text style={styles.placeholderText}>
-                    { !isDateRangeValid ? "날짜 범위를 7일 이상 설정해주세요." : "그래프에 표시할 항목을 설정에서 선택해주세요."}
+                    { !isDateRangeValid ? "날짜 범위를 7일 이상 설정해주세요." : !settings.graphCategory ? "그래프 기준(유형/행동)을 설정에서 선택해주세요." : "그래프에 표시할 항목이 없습니다."}
                  </Text>
              </View>
          )}
@@ -427,7 +515,7 @@ export default function PlaygroundScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 설정 모달 */}
+      {/*설정 모달*/}
       <SettingsModal
         isVisible={isModalVisible}
         onClose={() => setIsModalVisible(false)}
@@ -438,7 +526,7 @@ export default function PlaygroundScreen() {
   );
 }
 
-// 스타일 정의 
+// 스타일 정의
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -447,7 +535,7 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     padding: 20,
-    paddingTop: 40, // 상단 여백
+    paddingTop: 40, //  상단 여백 추가
   },
   card: {
     backgroundColor: C.card,
@@ -460,24 +548,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     position: 'relative', // 닫기 버튼 위치 기준
   },
-  disabledCard: { 
+  disabledCard: { //  비활성화 상태 카드 스타일
       opacity: 0.6,
       backgroundColor: C.inactiveToggle,
   },
   graphCard: {
     paddingVertical: 30,
   },
-  closeButton: { 
+  closeButton: { //  메인 화면 카드에도 적용되도록 스타일 유지
     position: 'absolute',
     top: 10,
     right: 10,
-    backgroundColor: C.closeButton,
+    backgroundColor: C.closeButton, // 이전 코드에서는 C.closeButton = '#9CA3AF'
     width: 24,
     height: 24,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 1,
+    zIndex: 1, // 다른 요소 위에 오도록 zIndex 설정
   },
   cardText: {
     fontSize: 18,
@@ -488,9 +576,8 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   graphContainer: {
-    width: GRAPH_SIZE,
-    height: GRAPH_SIZE,
-    marginBottom: 10,
+    width: GRAPH_SIZE, //  상수 사용
+    height: GRAPH_SIZE, //  상수 사용
     alignItems: 'center', // SVG 가운데 정렬
     justifyContent: 'center',
   },
@@ -526,7 +613,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  // 모달 스타일 
+  // 모달 스타일
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.6)', // 반투명 배경
@@ -643,7 +730,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  // 캘린더 모달 스타일
+  // 캘린더 모달
   calendarBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -674,5 +761,29 @@ const styles = StyleSheet.create({
       alignItems: 'center',
       padding: 10,
       borderRadius: 5,
+  },
+  //  범례 스타일
+  legendContainer: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      marginTop: 15, // 그래프와의 간격
+      paddingHorizontal: 10, // 좌우 여백
+  },
+  legendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginRight: 15, // 항목 간 간격
+      marginBottom: 5, // 줄 간격
+  },
+  legendColorBox: {
+      width: 12,
+      height: 12,
+      borderRadius: 3,
+      marginRight: 6, // 색상 박스와 텍스트 간격
+  },
+  legendText: {
+      fontSize: 12, // 범례 텍스트 크기
+      color: C.textDim, // 범례 텍스트 색상
   },
 });
