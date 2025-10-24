@@ -174,7 +174,8 @@ async function deleteTimeBlock(uid: string, dateISO: string, blockId: string) {
 }
 // [MOD] ───────────────────────────────────────────────────────────────
 
-export default function PurposeScreen() {
+// 
+export default function Purpose() { // 이름 변경 
   const router = useRouter();
   const { date } = useLocalSearchParams<{ date?: string }>();
   const selectedDate = (typeof date === "string" && date) || fmt(new Date());
@@ -224,66 +225,92 @@ export default function PurposeScreen() {
     return () => unsub();
   }, [uid, selectedDate]);
 
-//  겹치는 블록을 가로 분할 배치
+  //  겹치는 블록을 가로 분할 배치
+  //  시작 시간 기준으로 블록 정렬 / 동시 겹침 그룹 내에서 칼럼 배치
   const blockLayouts = useMemo(() => {
     //  시작 시간 기준으로 블록 정렬
     const sortedByTime = [...blocks].sort((a, b) => a.start - b.start);
     if (sortedByTime.length === 0) return new Map();
 
-    //  최종 레이아웃 정보를 담을 Map
-    const layouts = new Map<string, { top: number; height: number; left: string; width: string }>();
-    //  각 블록별로 동시에 최대로 겹치는 블록 수와 자신의 순서(인덱스)를 저장할 Map
-    const blockInfo = new Map<string, { maxOverlap: number, columnIndex: number }>();
+    type Layout = { top: number; height: number; left: string; width: string };
+    const layouts = new Map<string, Layout>();
 
-    //  모든 블록을 순회하며 각 블록의 최대 겹침 수와 순서 계산
-    for (let i = 0; i < sortedByTime.length; i++) {
-      const currentBlock = sortedByTime[i];
-      let maxOverlap = 1; // 자기 자신 포함
-      const overlappingBlocks: Block[] = [currentBlock]; // 현재 블록과 겹치는 블록들 (자신 포함)
+    // 클러스터 나누기 
+    type Cluster = Block[];
+    const clusters: Cluster[] = [];
+    let cur: Cluster = [];
+    let curEnd = -1;
 
-      //  현재 블록과 겹치는 다른 블록들을 찾음
-      for (let j = 0; j < sortedByTime.length; j++) {
-        if (i === j) continue; // 자기 자신 제외
-        const otherBlock = sortedByTime[j];
-        // 시간이 겹치는지 확인 (끝나는 시간은 겹치지 않는 것으로 간주)
-        if (currentBlock.end > otherBlock.start && currentBlock.start < otherBlock.end) {
-          overlappingBlocks.push(otherBlock);
+    for (const b of sortedByTime) {
+      if (cur.length === 0) {
+        cur.push(b);
+        curEnd = b.end;
+      } else {
+        if (b.start < curEnd) {
+          cur.push(b);
+          if (b.end > curEnd) curEnd = b.end;
+        } else {
+          clusters.push(cur);
+          cur = [b];
+          curEnd = b.end;
         }
       }
+    }
+    if (cur.length) clusters.push(cur);
 
-      //  겹치는 블록들을 시작 시간 순서로 정렬 (시작 시간 같으면 id로 정렬하여 일관성 유지)
-      overlappingBlocks.sort((a, b) => {
-        if (a.start !== b.start) {
-          return a.start - b.start;
+    clusters.forEach((cluster) => {
+      // 클러스터 내부는 시작시간→끝시간 보조정렬
+      const items = [...cluster].sort((a, b) => (a.start - b.start) || (a.end - b.end));
+
+      // columns: 각 칼럼의 마지막(end) 시각을 저장해서 재사용할 수 있는지 판별
+      const colEnds: number[] = [];         // 각 칼럼의 가장 최근 end
+      const colIndexMap = new Map<string, number>(); // 블록 id → 칼럼 인덱스
+
+      // 동시 활성 최대 개수를 정확히 구하기 위해 이벤트 스윕도 수행
+      type Evt = { t: number; kind: "start" | "end" };
+      const evts: Evt[] = [];
+      items.forEach(b => {
+        evts.push({ t: b.start, kind: "start" });
+        evts.push({ t: b.end,   kind: "end" });
+      });
+      evts.sort((a, b) => a.t - b.t || (a.kind === "end" ? -1 : 1)); // 같은 t에서는 end가 먼저 처리되도록
+
+      let active = 0;
+      let maxConcurrent = 0;
+      for (const e of evts) {
+        if (e.kind === "end") active--;     // [start,end) 반열림 처리
+        else { active++; if (active > maxConcurrent) maxConcurrent = active; }
+      }
+      const totalCols = Math.max(1, maxConcurrent);
+
+      // 칼럼 할당: 그리디로 가장 낮은 비어있는 칼럼부터
+      items.forEach(b => {
+        let idx = -1;
+        for (let i = 0; i < colEnds.length; i++) {
+          if (colEnds[i] <= b.start) { idx = i; break; }
         }
-        return a.id.localeCompare(b.id);
+        if (idx === -1) {
+          idx = colEnds.length;
+          colEnds.push(b.end);
+        } else {
+          colEnds[idx] = b.end;
+        }
+        colIndexMap.set(b.id, idx);
       });
 
-      //  현재 블록이 겹치는 블록들 중에서 몇 번째인지(columnIndex) 찾음
-      const columnIndex = overlappingBlocks.findIndex(b => b.id === currentBlock.id);
-
-      //  현재 블록이 지속되는 동안 *동시에* 최대로 겹치는 블록의 수를 계산
-      // (단순화: 여기서는 우선 겹치는 그룹 내 총 블록 수를 사용. 더 정확한 계산은 복잡해짐)
-      maxOverlap = overlappingBlocks.length;
-
-      //  계산된 정보를 Map에 저장
-      blockInfo.set(currentBlock.id, { maxOverlap, columnIndex });
-    }
-
-    //  저장된 정보를 바탕으로 최종 레이아웃(top, height, left, width) 계산
-    for (const block of sortedByTime) {
-      const info = blockInfo.get(block.id);
-      if (info) {
-        const { maxOverlap, columnIndex } = info;
-        layouts.set(block.id, {
-          top: (block.start / 60) * HOUR_HEIGHT,
-          height: ((block.end - block.start) / 60) * HOUR_HEIGHT,
-          //  left와 width 계산 방식 변경
-          left: `${(100 / maxOverlap) * columnIndex}%`,
-          width: `${100 / maxOverlap}%`,
+      // 레이아웃 기록
+      items.forEach(b => {
+        const idx = colIndexMap.get(b.id) ?? 0;
+        const leftPct = (100 / totalCols) * idx;
+        const widthPct = 100 / totalCols;
+        layouts.set(b.id, {
+          top: (b.start / 60) * HOUR_HEIGHT,
+          height: ((b.end - b.start) / 60) * HOUR_HEIGHT,
+          left: `${leftPct}%`,
+          width: `${widthPct}%`,
         });
-      }
-    }
+      });
+    });
 
     return layouts; // 계산된 레이아웃 Map 반환
   }, [blocks]); // blocks 배열이 변경될 때만 이 로직 재실행
@@ -587,7 +614,7 @@ export default function PurposeScreen() {
                   style={[
                     styles.block,
                     {
-                      ...layout,
+                      ...(layout as any),
                       backgroundColor: b.color,
                       transform: [{ translateY }],
                       zIndex: isDragging ? 2 : 1,
@@ -640,7 +667,6 @@ export default function PurposeScreen() {
            <Text style={styles.fabText}>＋</Text>
          </TouchableOpacity>
       </View>
-
 
       {/* 추가/편집 모달 */}
       <Modal visible={modalMode !== null} transparent animationType="fade" onRequestClose={closeModal}>
