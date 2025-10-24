@@ -84,10 +84,29 @@ const toDateFromMinutes = (minutes: number) => {
   base.setMinutes(minutes);
   return base;
 };
+
+/*랜덤색상 삭제
 const randomColor = () => {
   const colors = ["#60A5FA", "#34D399", "#F59E0B", "#F472B6", "#A78BFA", "#F87171"];
   return colors[(Math.random() * colors.length) | 0];
-};
+};*/
+
+//추가
+function pickColorForId(id: string) {
+  let hash = 0;
+  if (id.length === 0) return "hsl(0, 70%, 65%)"; // ID가 없는 경우 기본색
+
+  for (let i = 0; i < id.length; i++) {
+    // 31은 소수(prime number)이며, 해시 충돌을 줄이는 데 자주 사용됩니다.
+    hash = (hash * 31 + id.charCodeAt(i)) | 0; // | 0은 정수형으로 변환
+  }
+  
+  const hue = Math.abs(hash) % 360; // 0~359 사이의 고유한 색상(hue) 값
+  const saturation = 70; // 채도 (70%로 고정)
+  const lightness = 65;  // 명도 (65%로 고정)
+
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+}
 
 //  타임블록 구조
 type Block = {
@@ -105,6 +124,7 @@ type Block = {
 //  초기 표시용 데이터(초기 렌더용 목업)
 const makeId = () => Math.random().toString(36).slice(2, 9);
 const buildInitial = () => {
+  /*
   const today = fmt(new Date());
   const yesterday = addDays(today, -1);
   const tomorrow = addDays(today, +1);
@@ -117,7 +137,8 @@ const buildInitial = () => {
     ] as Block[],
     [yesterday]: [{ id: makeId(), start: 540, end: 1020, color: "#F59E0B", purpose: "과제", isGoal: true }],
     [tomorrow]: [{ id: makeId(), start: 600, end: 900, color: "#F472B6", purpose: "회의" }],
-  } as Record<string, Block[]>;
+  } as Record<string, Block[]>;*/
+   return {} as Record<string, Block[]>;
 };
 
 // [MOD] ───────────── Firestore 경로 유틸 & 저장/삭제 로직 ─────────────
@@ -213,7 +234,7 @@ export default function Purpose() { // 이름 변경
             action: d.action || "",
             purpose: d.purpose || "",
             isGoal: !!d.isGoal,
-            color: prevItem?.color || randomColor(),
+            color: pickColorForId(docSnap.id),
           };
         });
         return { ...prev, [selectedDate]: nextBlocks };
@@ -712,18 +733,20 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
   const [timePicker, setTimePicker] = useState<'start' | 'end' | null>(null);
 
   const handleSave = () => {
-    onSave({
-      id: initialData?.id || makeId(),
-      purpose,
-      type,
-      action,
-      isGoal,
-      start: fromDateToMinutes(startTime),
-      end: fromDateToMinutes(endTime),
-      color: initialData?.color || randomColor(),
-    });
-    onClose();
-  };
+   const blockId = initialData?.id || makeId(); // ✨ 1. ID를 여기서 먼저 생성합니다.
+
+   onSave({
+     id: blockId, // ✨ 2. 생성된 ID를 'id:'에 사용합니다.
+     purpose,
+     type,
+     action,
+     isGoal,
+     start: fromDateToMinutes(startTime),
+     end: fromDateToMinutes(endTime),
+     color: pickColorForId(blockId), // ✨ 3. 동일한 ID를 'color:'에도 사용합니다.
+   });
+   onClose();
+ };
 
   //  삭제 핸들러
   const handleDelete = () => {
