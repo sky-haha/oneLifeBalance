@@ -297,17 +297,6 @@ export default function PurposeScreen() {
   //  모달: 추가/편집 모드 및 선택 블록
   const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<Block | null>(null);
-  //  자동 생성 모달 상태
-  const [isAutoModalVisible, setIsAutoModalVisible] = useState(false);
-  //  자동 생성 모달 내부 상태
-  const [autoType, setAutoType] = useState('개인');
-  const [autoAction, setAutoAction] = useState('기타');
-  const [autoPickerState, setAutoPickerState] = useState<{
-    visible: boolean;
-    title: string;
-    items: string[];
-    onSelect: (item: string) => void;
-  }>({ visible: false, title: '', items: [], onSelect: () => {} });
 
 
   const openAddModal = () => {
@@ -321,19 +310,6 @@ export default function PurposeScreen() {
   const closeModal = () => {
     setModalMode(null);
     setSelectedBlock(null);
-  };
-  //  자동 생성 모달 열기/닫기
-  const openAutoModal = () => setIsAutoModalVisible(true);
-  const closeAutoModal = () => setIsAutoModalVisible(false);
-  //  자동 생성 모달 피커 열기
-  const openAutoPicker = (title: string, items: string[], onSelect: (item: string) => void) => {
-    setAutoPickerState({ visible: true, title, items, onSelect });
-  };
-  //  자동 생성 모달 저장 핸들러 (임시)
-  const handleAutoGenerate = () => {
-    console.log("자동 생성:", { type: autoType, action: autoAction });
-    // TODO: 자동 생성 로직 구현
-    closeAutoModal();
   };
 
 
@@ -659,11 +635,6 @@ export default function PurposeScreen() {
 
       {/* 버튼들을 감싸는 컨테이너 */}
       <View style={styles.fabContainer}>
-         {/* 일정 자동 생성 버튼 */}
-         <TouchableOpacity style={styles.autoFab} activeOpacity={0.9} onPress={openAutoModal}>
-            <Text style={styles.fabText}>!</Text>
-         </TouchableOpacity>
-
          {/* 기존 할 일 추가 버튼 */}
          <TouchableOpacity style={styles.fab} activeOpacity={0.9} onPress={openAddModal}>
            <Text style={styles.fabText}>＋</Text>
@@ -681,70 +652,6 @@ export default function PurposeScreen() {
           onSave={handleSave}
           onDelete={handleDelete}
         />
-      </Modal>
-
-      {/*  일정 자동 생성 모달 */}
-      <Modal visible={isAutoModalVisible} transparent animationType="fade" onRequestClose={closeAutoModal}>
-         {/*  NewModalBody와 유사한 구조 사용 */}
-         <View style={styles.backdrop}>
-           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalContainer}>
-             <View style={styles.modalCard}>
-               {/* 모달 헤더 */}
-               <View style={styles.newModalHeader}>
-                 <Text style={styles.modalTitle}>일정 자동 생성</Text>
-                 {/* 필요시 여기에 다른 액션 추가 가능 */}
-               </View>
-
-               {/* 할일 유형(커스텀 피커) */}
-               <Text style={styles.label}>할일 유형</Text>
-               <TouchableOpacity style={styles.pickerButton} onPress={() => openAutoPicker('할일 유형 선택', TYPES, setAutoType)}>
-                 <Text style={styles.pickerButtonText}>{autoType}</Text>
-               </TouchableOpacity>
-
-               {/* 행동 유형(커스텀 피커) */}
-               <Text style={styles.label}>행동 유형</Text>
-               <TouchableOpacity style={styles.pickerButton} onPress={() => openAutoPicker('행동 유형 선택', ACTIONS, setAutoAction)}>
-                 <Text style={styles.pickerButtonText}>{autoAction}</Text>
-               </TouchableOpacity>
-
-               {/* 하단 버튼 */}
-               <View style={styles.footerRow}>
-                 <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={closeAutoModal}>
-                   <Text style={styles.btnGhostText}>취소</Text>
-                 </TouchableOpacity>
-                 <TouchableOpacity style={[styles.btn, {backgroundColor: C.secondary}]} onPress={handleAutoGenerate}>
-                   <Text style={styles.btnPrimaryText}>생성</Text>
-                 </TouchableOpacity>
-               </View>
-             </View>
-           </KeyboardAvoidingView>
-
-           {/* 자동 생성용 커스텀 피커 모달 */}
-           <Modal
-             transparent={true}
-             visible={autoPickerState.visible}
-             animationType="fade"
-             onRequestClose={() => setAutoPickerState({ ...autoPickerState, visible: false })}
-           >
-             <TouchableOpacity style={styles.pickerBackdrop} onPress={() => setAutoPickerState({ ...autoPickerState, visible: false })}>
-               <View style={styles.pickerContainer}>
-                 <Text style={styles.pickerTitle}>{autoPickerState.title}</Text>
-                 {autoPickerState.items.map(item => (
-                   <TouchableOpacity
-                     key={item}
-                     style={styles.pickerItem}
-                     onPress={() => {
-                       autoPickerState.onSelect(item);
-                       setAutoPickerState({ ...autoPickerState, visible: false });
-                     }}
-                   >
-                     <Text style={styles.pickerItemText}>{item}</Text>
-                   </TouchableOpacity>
-                 ))}
-               </View>
-             </TouchableOpacity>
-           </Modal>
-         </View>
       </Modal>
 
     </View>
@@ -816,6 +723,12 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
     }
   };
 
+  // 할 일 자동 추가 버튼 핸들러 (임시)
+  const handleAutoAddPress = () => {
+    console.log("할 일 자동 추가 버튼 클릭");
+    // 여기에 실제 기능 구현
+  };
+
   return (
     <View style={styles.backdrop}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalContainer}>
@@ -856,7 +769,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
           <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('행동 유형 선택', ACTIONS, setAction)}>
             <Text style={styles.pickerButtonText}>{action}</Text>
           </TouchableOpacity>
-          
+
           {/* 시간 선택 (시작/종료) */}
           <Text style={styles.label}>시간</Text>
           <View style={styles.timeRow}>
@@ -870,6 +783,10 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
 
           {/* 하단 버튼 */}
           <View style={styles.footerRow}>
+             {/*  할 일 자동 추가 버튼 */}
+             <TouchableOpacity style={[styles.btn, styles.btnAuto]} onPress={handleAutoAddPress}>
+                 <Text style={styles.btnAutoText}>할 일 자동 추가</Text>
+             </TouchableOpacity>
             <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={onClose}>
               <Text style={styles.btnGhostText}>취소</Text>
             </TouchableOpacity>
@@ -998,7 +915,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 16,
     bottom: 22,
-    alignItems: 'center', // 버튼들을 세로 중앙 정렬 (필요하다면)
+    alignItems: 'center',
   },
   fab: {
     width: 56,
@@ -1010,16 +927,6 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   fabText: { color: "#0B1220", fontSize: 26, fontWeight: "800", marginTop: -2 },
-  autoFab: {
-    width: 56,
-    height: 56,
-    borderRadius: 28, 
-    backgroundColor: C.secondary, 
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 4,
-    marginBottom: 12, 
-  },
   handleTop: {
     position: "absolute", top: 0, left: 0, right: 0, height: 28, marginTop: -8, justifyContent: "center", alignItems: "center", zIndex: 3,
   },
@@ -1039,7 +946,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   modalCard: {
-    width: '100%', // 너비 조정
+    width: '100%',
     backgroundColor: C.card,
     borderRadius: 16,
     padding: 20,
@@ -1134,15 +1041,24 @@ const styles = StyleSheet.create({
   timeBtnText: { color: C.text, fontWeight: "600", fontSize: 16 },
   footerRow: { flexDirection: "row", gap: 12, marginTop: 24 },
   btn: {
-    flex: 1,
-    borderRadius: 12,
+    borderRadius: 12, // flex: 1 제거
     paddingVertical: 14,
     alignItems: "center",
+    paddingHorizontal: 16, // 좌우 패딩 추가
   },
-  btnGhost: { backgroundColor: C.border },
+  btnGhost: { backgroundColor: C.border, flex: 1 }, // 취소 버튼은 남은 공간 차지
   btnGhostText: { color: C.text, fontWeight: "700" },
-  btnPrimary: { backgroundColor: C.primary },
+  btnPrimary: { backgroundColor: C.primary, flex: 1 }, // 저장 버튼도 남은 공간 차지
   btnPrimaryText: { color: "#FFF", fontWeight: "bold" },
+  //  자동 추가 버튼 스타일
+  btnAuto: {
+      backgroundColor: C.secondary, // 다른 색상 사용
+  },
+  btnAutoText: {
+      color: "#FFF", // 흰색 텍스트
+      fontWeight: 'bold',
+      fontSize: 14, // 텍스트 크기 조정 (선택 사항)
+  },
 
   pickerBackdrop: {
     flex: 1,
