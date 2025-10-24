@@ -18,7 +18,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
+          title: "메인",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),
@@ -27,7 +27,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="explore"
         options={{
-          title: "Explore",
+          title: "고정 할 일",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="paper-plane" size={size} color={color} />
           ),
@@ -36,7 +36,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="login"
         options={{
-          title: "login",
+          title: "회원정보",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="lock-closed" size={size} color={color} />
           ),
@@ -62,7 +62,7 @@ export default function TabLayout() {
         <Tabs.Screen
         name="playground"
         options={{
-          title: "playground",
+          title: "분석",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="flag-outline" size={size} color={color} />
           ),
