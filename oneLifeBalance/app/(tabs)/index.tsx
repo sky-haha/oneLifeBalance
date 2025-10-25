@@ -3,7 +3,6 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Dimensions, Modal, PanResponder, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Calendar } from "react-native-calendars";
-// [추가] SvgText 임포트 추가
 import { Circle, Path, Svg, Text as SvgText } from "react-native-svg";
 
 // 🔐 Firebase (경로는 프로젝트에 맞게 변경)
@@ -103,7 +102,7 @@ type ProcessedBlock = {
 // 고유 ID 생성
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
-// [수정] ID 기반 해시(Hash)를 HSL 색상값으로 변환하는 함수 (Purpose.tsx와 동일하게)
+// ID 기반 해시를 HSL 색상값으로 변환
 function pickColorForId(id: string) {
   let hash = 0;
   if (id.length === 0) return "hsl(0, 70%, 65%)"; // ID가 없는 경우 기본색
@@ -162,7 +161,7 @@ export default function NewIndex() {
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [serverBlocksByDate, setServerBlocksByDate] = useState<Record<string, Block[]>>({});
-  // [추가] AM/PM 모드 상태 추가 (기본값 'AM')
+  // AM/PM 모드 상태 (기본값 'AM')
   const [ampmMode, setAmpmMode] = useState<'AM' | 'PM'>('AM');
 
   const toggleCheck = (id: string) => {
@@ -193,7 +192,7 @@ export default function NewIndex() {
             end: typeof d.endTime === "number" ? d.endTime : 0,
             label: d.purpose || "",
             isGoal: !!d.isGoal,
-            // [수정] 팔레트 방식이 아닌 ID 기반 HSL 함수를 사용하도록 수정
+            // ID 기반 HSL
             color: pickColorForId(ds.id),
           };
         });
@@ -205,7 +204,7 @@ export default function NewIndex() {
   }, [uid, selectedDate]);
 
 
-  // [수정] currentBlocks 계산 시 AM/PM 필터링 추가
+  // currentBlocks 계산 시 AM/PM 필터링 추가
   const currentBlocks = useMemo(() => {
     // 원본 데이터 가져오기 (로그인 시 서버, 아니면 빈 배열)
     const baseBlocks = uid ? serverBlocksByDate[selectedDate] || [] : [];
@@ -216,11 +215,11 @@ export default function NewIndex() {
     } else { // 'PM'
       return baseBlocks.filter(b => b.start >= HALF_DAY);
     }
-  }, [uid, serverBlocksByDate, selectedDate, ampmMode]); // [추가] ampmMode 의존성 추가
+  }, [uid, serverBlocksByDate, selectedDate, ampmMode]); //  ampmMode 의존성 추가
 
   // 도넛 차트에 빈 시간 채우기 + 링 배치 (원본 로직 사용)
   const processedBlocks = useMemo((): ProcessedBlock[] => {
-    // [추가] uid가 없거나 필터링된 블록이 없으면 빈 배열 반환
+    // uid가 없거나 필터링된 블록이 없으면 빈 배열 반환
     if (!uid || !currentBlocks || currentBlocks.length === 0) return [];
 
     const rings = [
@@ -229,7 +228,7 @@ export default function NewIndex() {
       { innerRadius: 11, outerRadius: 22 },
     ];
 
-    // [수정] 12시간 기준으로 빈 시간 채우기 (0~719 또는 720~1439 범위)
+    //  12시간 기준으로 빈 시간 채우기
     const HALF_DAY = 720;
     const isAM = ampmMode === 'AM';
     const rangeStart = isAM ? 0 : HALF_DAY;
@@ -293,7 +292,7 @@ export default function NewIndex() {
       }
     }
     return layouts;
-  }, [currentBlocks, uid, ampmMode]); // [추가] ampmMode 의존성 추가
+  }, [currentBlocks, uid, ampmMode]); // ampmMode 의존성 추가
 
 
   // 날짜 전환, 스와이프, 목적 화면 이동 함수 ...
@@ -334,7 +333,7 @@ export default function NewIndex() {
             <Text style={styles.headerBtnText}>내일 →</Text>
           </TouchableOpacity>
         </View>
-        {/* [추가] AM/PM 토글 버튼 */}
+        {/* AM/PM 토글 버튼 */}
         <View style={styles.ampmToggleContainer}>
             <TouchableOpacity
                 style={[styles.ampmButton, ampmMode === 'AM' && styles.ampmButtonActive]}
@@ -368,7 +367,7 @@ export default function NewIndex() {
 
             {/* 중앙 텍스트 */}
             {!uid ? (
-              // [추가] 로그아웃 시
+              // 비로그인 시
               <SvgText x="50" y="50" textAnchor="middle" alignmentBaseline="central" fontSize="6" fill="#6B7280" fontWeight="600">
                 로그인이 필요합니다.
               </SvgText>
@@ -384,7 +383,7 @@ export default function NewIndex() {
       {/* 하단 할 일 목록 */}
       <ScrollView contentContainerStyle={styles.cardsArea}>
         {(() => {
-          // [수정] 필터링된 currentBlocks 사용
+          // 필터링된 currentBlocks 사용
           const visibleList = (currentBlocks || []).filter(
             (b) => b.label !== "빈 시간" && b.isGoal
           );
@@ -401,7 +400,7 @@ export default function NewIndex() {
           if (visibleList.length === 0) {
             return (
               <View style={styles.placeholderCard}>
-                {/* [추가] AM/PM 모드에 따른 메시지 분기 */}
+                {/* AM/PM 모드에 따른 메시지 */}
                 <Text style={styles.placeholderText}>
                     {ampmMode === 'AM' ? '오전' : '오후'} 목표 할 일이 없습니다.
                 </Text>
@@ -460,7 +459,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F6",
   },
   headerBtnText: { fontSize: 13, fontWeight: "600", color: "#111827" },
-  // [추가] AM/PM 토글 컨테이너 스타일
+  // AM/PM 토글 컨테이너 스타일
   ampmToggleContainer: {
     flexDirection: 'row',
     marginTop: 10,
@@ -468,13 +467,13 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     padding: 4,
   },
-  // [추가] AM/PM 버튼 스타일
+  //  AM/PM 버튼 스타일
   ampmButton: {
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 999,
   },
-  // [추가] 활성화된 AM/PM 버튼 스타일
+  //  활성화된 AM/PM 버튼 스타일
   ampmButtonActive: {
     backgroundColor: 'white', // 활성 배경색
     shadowColor: "#000", // iOS 그림자
@@ -483,13 +482,13 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2, // Android 그림자
   },
-  // [추가] AM/PM 버튼 텍스트 스타일
+  //  AM/PM 버튼 텍스트 스타일
   ampmButtonText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#6B7280', // 비활성 텍스트 색
   },
-  // [추가] 활성화된 AM/PM 버튼 텍스트 스타일
+  //  활성화된 AM/PM 버튼 텍스트 스타일
   ampmButtonTextActive: {
     color: '#111827', // 활성 텍스트 색
   },

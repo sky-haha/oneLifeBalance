@@ -121,7 +121,7 @@ type Block = {
   // fix는 아직 UI에서 안 씀 → 서버에는 false로 저장
 };
 
-//  초기 표시용 데이터(초기 렌더용 목업)
+//  초기 표시용 데이터
 const makeId = () => Math.random().toString(36).slice(2, 9);
 const buildInitial = () => {
   /*
@@ -733,17 +733,17 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
   const [timePicker, setTimePicker] = useState<'start' | 'end' | null>(null);
 
   const handleSave = () => {
-   const blockId = initialData?.id || makeId(); // ✨ 1. ID를 여기서 먼저 생성합니다.
+   const blockId = initialData?.id || makeId(); // ID를 생성
 
    onSave({
-     id: blockId, // ✨ 2. 생성된 ID를 'id:'에 사용합니다.
+     id: blockId,
      purpose,
      type,
      action,
      isGoal,
      start: fromDateToMinutes(startTime),
      end: fromDateToMinutes(endTime),
-     color: pickColorForId(blockId), // ✨ 3. 동일한 ID를 'color:'에도 사용합니다.
+     color: pickColorForId(blockId),
    });
    onClose();
  };
