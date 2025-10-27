@@ -1,3 +1,4 @@
+// Purpose.tsx
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -34,6 +35,9 @@ import {
   updateDoc
 } from "firebase/firestore";
 import { auth, db } from "./firebaseConfig"; // 경로 확인
+
+// [ADD] GPT 유틸
+import { suggestAutoTasks } from "./gptClient";
 // [MOD] ───────────────────────────────────────────────────────────────
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -51,15 +55,15 @@ const C = {
 };
 
 // 시간표 UI 배치 관련
-const HOUR_HEIGHT = 44;          // 1시간(60분) 당 세로 높이(px)
-const HOURS = Array.from({ length: 25 }, (_, i) => i); // 0~24시 라인
-const LABEL_GUTTER = 56;         //  좌측 시간 레일 폭
-const SNAP_MIN = 30;             //  드래그 이동 스냅 간격
-const FLICK_PROJECT_PX = 160;    //  빠른 드래그시 관성 보정 픽셀
-const DRAG_THRESHOLD_PX = 8;     //  드래그 시작 임계값
-const MIN_PROJECT_VY = 0.35;     //  플릭으로 간주할 최소 세로 속도
-const HANDLE_ZONE_PX = 24;       //  블록 상/하단 리사이즈 핸들 감지 영역
-const RESIZE_SNAP_MIN = 15;      //  리사이즈 스냅 간격
+const HOUR_HEIGHT = 44;
+const HOURS = Array.from({ length: 25 }, (_, i) => i);
+const LABEL_GUTTER = 56;
+const SNAP_MIN = 30;
+const FLICK_PROJECT_PX = 160;
+const DRAG_THRESHOLD_PX = 8;
+const MIN_PROJECT_VY = 0.35;
+const HANDLE_ZONE_PX = 24;
+const RESIZE_SNAP_MIN = 15;
 
 //  유형/행동 카테고리 옵션
 const TYPES = ['휴식', '가족', '개인', '자기개발', '이동', '식사'];
@@ -99,7 +103,6 @@ type Block = {
   type?: string;
   action?: string;
   isGoal?: boolean;
-  // fix는 아직 UI에서 안 씀 → 서버에는 false로 저장
 };
 
 //  초기 표시용 데이터(초기 렌더용 목업)
@@ -155,7 +158,7 @@ async function saveTimeBlock(uid: string, dateISO: string, block: Block) {
     action: block.action ?? "",
     purpose: block.purpose ?? "",
     isGoal: !!block.isGoal,
-    fix: false, // 아직 UI에서 안 쓰므로 false로 저장
+    fix: false,
     updatedAt: serverTimestamp(),
   };
   await setDoc(tref, { ...payload, createdAt: serverTimestamp() }, { merge: true });
@@ -175,7 +178,7 @@ async function deleteTimeBlock(uid: string, dateISO: string, blockId: string) {
 // [MOD] ───────────────────────────────────────────────────────────────
 
 // 
-export default function Purpose() { // 이름 변경 
+export default function Purpose() {
   const router = useRouter();
   const { date } = useLocalSearchParams<{ date?: string }>();
   const selectedDate = (typeof date === "string" && date) || fmt(new Date());
@@ -225,17 +228,13 @@ export default function Purpose() { // 이름 변경
     return () => unsub();
   }, [uid, selectedDate]);
 
-  //  겹치는 블록을 가로 분할 배치
-  //  시작 시간 기준으로 블록 정렬 / 동시 겹침 그룹 내에서 칼럼 배치
+  //  겹치는 블록 레이아웃 계산 (생략: 기존 동일)
+  type Layout = { top: number; height: number; left: string; width: string };
   const blockLayouts = useMemo(() => {
-    //  시작 시간 기준으로 블록 정렬
     const sortedByTime = [...blocks].sort((a, b) => a.start - b.start);
-    if (sortedByTime.length === 0) return new Map();
+    if (sortedByTime.length === 0) return new Map<string, Layout>();
 
-    type Layout = { top: number; height: number; left: string; width: string };
     const layouts = new Map<string, Layout>();
-
-    // 클러스터 나누기 
     type Cluster = Block[];
     const clusters: Cluster[] = [];
     let cur: Cluster = [];
@@ -243,62 +242,40 @@ export default function Purpose() { // 이름 변경
 
     for (const b of sortedByTime) {
       if (cur.length === 0) {
-        cur.push(b);
-        curEnd = b.end;
+        cur.push(b); curEnd = b.end;
       } else {
-        if (b.start < curEnd) {
-          cur.push(b);
-          if (b.end > curEnd) curEnd = b.end;
-        } else {
-          clusters.push(cur);
-          cur = [b];
-          curEnd = b.end;
-        }
+        if (b.start < curEnd) { cur.push(b); if (b.end > curEnd) curEnd = b.end; }
+        else { clusters.push(cur); cur = [b]; curEnd = b.end; }
       }
     }
     if (cur.length) clusters.push(cur);
 
     clusters.forEach((cluster) => {
-      // 클러스터 내부는 시작시간→끝시간 보조정렬
       const items = [...cluster].sort((a, b) => (a.start - b.start) || (a.end - b.end));
 
-      // columns: 각 칼럼의 마지막(end) 시각을 저장해서 재사용할 수 있는지 판별
-      const colEnds: number[] = [];         // 각 칼럼의 가장 최근 end
-      const colIndexMap = new Map<string, number>(); // 블록 id → 칼럼 인덱스
+      const colEnds: number[] = [];
+      const colIndexMap = new Map<string, number>();
 
-      // 동시 활성 최대 개수를 정확히 구하기 위해 이벤트 스윕도 수행
       type Evt = { t: number; kind: "start" | "end" };
       const evts: Evt[] = [];
-      items.forEach(b => {
-        evts.push({ t: b.start, kind: "start" });
-        evts.push({ t: b.end,   kind: "end" });
-      });
-      evts.sort((a, b) => a.t - b.t || (a.kind === "end" ? -1 : 1)); // 같은 t에서는 end가 먼저 처리되도록
+      items.forEach(b => { evts.push({ t: b.start, kind: "start" }); evts.push({ t: b.end, kind: "end" }); });
+      evts.sort((a, b) => a.t - b.t || (a.kind === "end" ? -1 : 1));
 
       let active = 0;
       let maxConcurrent = 0;
       for (const e of evts) {
-        if (e.kind === "end") active--;     // [start,end) 반열림 처리
+        if (e.kind === "end") active--;
         else { active++; if (active > maxConcurrent) maxConcurrent = active; }
       }
       const totalCols = Math.max(1, maxConcurrent);
 
-      // 칼럼 할당: 그리디로 가장 낮은 비어있는 칼럼부터
       items.forEach(b => {
         let idx = -1;
-        for (let i = 0; i < colEnds.length; i++) {
-          if (colEnds[i] <= b.start) { idx = i; break; }
-        }
-        if (idx === -1) {
-          idx = colEnds.length;
-          colEnds.push(b.end);
-        } else {
-          colEnds[idx] = b.end;
-        }
+        for (let i = 0; i < colEnds.length; i++) if (colEnds[i] <= b.start) { idx = i; break; }
+        if (idx === -1) { idx = colEnds.length; colEnds.push(b.end); } else { colEnds[idx] = b.end; }
         colIndexMap.set(b.id, idx);
       });
 
-      // 레이아웃 기록
       items.forEach(b => {
         const idx = colIndexMap.get(b.id) ?? 0;
         const leftPct = (100 / totalCols) * idx;
@@ -312,48 +289,32 @@ export default function Purpose() { // 이름 변경
       });
     });
 
-    return layouts; // 계산된 레이아웃 Map 반환
-  }, [blocks]); // blocks 배열이 변경될 때만 이 로직 재실행
+    return layouts;
+  }, [blocks]);
 
-  //  상단 좌상단 백버튼
+  //  네비
   const goBack = () => {
     if ((router as any).canGoBack?.()) router.back();
     else router.replace("/(tabs)");
   };
 
-  //  모달: 추가/편집 모드 및 선택 블록
+  //  모달 상태
   const [modalMode, setModalMode] = useState<'add' | 'edit' | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<Block | null>(null);
 
+  const openAddModal = () => { setSelectedBlock(null); setModalMode('add'); };
+  const openEditModal = (block: Block) => { setSelectedBlock(block); setModalMode('edit'); };
+  const closeModal = () => { setModalMode(null); setSelectedBlock(null); };
 
-  const openAddModal = () => {
-    setSelectedBlock(null);
-    setModalMode('add');
-  };
-  const openEditModal = (block: Block) => {
-    setSelectedBlock(block);
-    setModalMode('edit');
-  };
-  const closeModal = () => {
-    setModalMode(null);
-    setSelectedBlock(null);
-  };
-
-
-  // [MOD] 저장/삭제 핸들러: 로컬 반영 + 서버 반영
+  // 저장/삭제
   const handleSave = async (newBlock: Block) => {
     setByDate(prev => {
       const currentDayBlocks = prev[selectedDate] || [];
       const existingIndex = currentDayBlocks.findIndex(b => b.id === newBlock.id);
-
-      let updatedBlocks;
-      if (existingIndex > -1) {
-        updatedBlocks = [...currentDayBlocks];
-        updatedBlocks[existingIndex] = newBlock;
-      } else {
-        updatedBlocks = [...currentDayBlocks, newBlock];
-      }
-      return { ...prev, [selectedDate]: updatedBlocks };
+      const updated = existingIndex > -1
+        ? Object.assign([...currentDayBlocks], { [existingIndex]: newBlock })
+        : [...currentDayBlocks, newBlock];
+      return { ...prev, [selectedDate]: updated };
     });
 
     try {
@@ -370,7 +331,6 @@ export default function Purpose() { // 이름 변경
       ...prev,
       [selectedDate]: (prev[selectedDate] || []).filter(b => b.id !== idToDelete),
     }));
-
     try {
       const u = auth.currentUser;
       if (!u) throw new Error("로그인이 필요합니다.");
@@ -380,29 +340,75 @@ export default function Purpose() { // 이름 변경
     }
   };
 
-  //  스크롤락: 드래그/리사이즈 중에는 ScrollView 스크롤 비활성화
+  // [ADD] 자동 추가: GPT → 서브태스크 생성 → Firestore 저장
+  const handleAutoAdd = async (base: Block) => {
+    try {
+      const u = auth.currentUser;
+      if (!u) throw new Error("로그인이 필요합니다.");
+      if (!base?.type || !base?.action) throw new Error("type/action이 비어 있어 자동 생성이 불가합니다.");
+      if (!(base.end > base.start)) throw new Error("시간 범위가 올바르지 않습니다.");
+
+      // 1) GPT로 서브태스크 얻기
+      const suggestion = await suggestAutoTasks({
+        dateISO: selectedDate,
+        startMin: base.start,
+        endMin: base.end,
+        type: base.type!,
+        action: base.action!,
+        purpose: base.purpose,
+      });
+
+      // 2) 시간을 연속적으로 배치
+      const newBlocks: Block[] = [];
+      let cursor = base.start;
+      suggestion.tasks.forEach((t) => {
+        const span = Math.max(5, Math.min(t.minutes, base.end - cursor));
+        if (span <= 0) return;
+        newBlocks.push({
+          id: makeId(),
+          start: cursor,
+          end: cursor + span,
+          type: base.type,
+          action: base.action,
+          purpose: t.purpose,
+          isGoal: false,
+          color: randomColor(),
+        });
+        cursor += span;
+      });
+
+      if (newBlocks.length === 0) throw new Error("생성된 서브태스크가 없습니다.");
+
+      // 3) Firestore 저장 (병렬)
+      await Promise.all(newBlocks.map(b => saveTimeBlock(u.uid!, selectedDate, b)));
+
+      // 4) 로컬 상태 즉시 반영
+      setByDate(prev => {
+        const rest = (prev[selectedDate] || []).filter(x => x.id !== base.id);
+        return { ...prev, [selectedDate]: [...rest, ...newBlocks] };
+      });
+
+      // (선택) 원래 블록은 분해하므로 삭제 처리 원한다면 아래 주석 해제
+      // await deleteTimeBlock(u.uid!, selectedDate, base.id);
+
+    } catch (e: any) {
+      console.warn("[handleAutoAdd] 실패:", e?.message || e);
+    }
+  };
+
+  // 드래그/리사이즈 관련 (기존 그대로) … ↓↓↓
   const [scrollLock, setScrollLock] = useState(false);
   const dragY = useState(new Animated.Value(0))[0];
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragStartTop, setDragStartTop] = useState(0);
   const [dragDurationMin, setDragDurationMin] = useState(0);
 
-  //  px↔분 변환 + 스냅/클램프
   const minutesFromTopPx = (topPx: number) => Math.round((topPx / HOUR_HEIGHT) * 60);
   const snapMinutes = (min: number) => Math.round(min / SNAP_MIN) * SNAP_MIN;
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const contentHeight = HOUR_HEIGHT * 24;
 
-  const contentHeight = HOUR_HEIGHT * 24; //  24시간 높이
-
-  //  리사이즈 상태
-  const [resizingId, setResizingId] = useState<null | {
-    id: string;
-    edge: "top" | "bottom";
-    origStart: number;
-    origEnd: number;
-  }>(null);
-
-  //  리사이즈 핸들 감지 유틸
+  const [resizingId, setResizingId] = useState<null | { id: string; edge: "top" | "bottom"; origStart: number; origEnd: number; }>(null);
   const inTopHandleZone = (y: number) => y <= HANDLE_ZONE_PX;
   const inBottomHandleZone = (y: number, hPx: number) => y >= hPx - HANDLE_ZONE_PX;
   const snapResize = (min: number) => Math.round(min / RESIZE_SNAP_MIN) * RESIZE_SNAP_MIN;
@@ -420,7 +426,7 @@ export default function Purpose() { // 이름 변경
         </View>
       </SafeAreaView>
 
-      {/* 메인 타임라인 스크롤 영역 */}
+      {/* 메인 타임라인 */}
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ height: contentHeight }}
@@ -440,21 +446,17 @@ export default function Purpose() { // 이름 변경
             ))}
           </View>
 
-          {/* 우측 캔버스(블록) */}
+          {/* 우측 블록 캔버스 */}
           <View style={[styles.canvas, { height: contentHeight }]}>
-            {/* 시간선(가로 그리드) */}
             {HOURS.map((h) => (
               <View key={`grid-${h}`} style={[styles.gridLine, { top: h * HOUR_HEIGHT }]} />
             ))}
 
-            {/* 실제 블록 렌더/드래그/리사이즈 */}
             {blocks.map((b) => {
               const layout = blockLayouts.get(b.id);
               if (!layout) return null;
-
               const { top, height } = layout;
 
-              // [MOD] 블록 이동용 PanResponder (Release 시 서버 저장)
               const responder = PanResponder.create({
                 onStartShouldSetPanResponder: (e) => {
                   if (resizingId) return false;
@@ -491,7 +493,6 @@ export default function Purpose() { // 이름 변경
                   newStartMin = clamp(newStartMin, 0, 1440 - dragDurationMin);
                   const newEndMin = newStartMin + dragDurationMin;
 
-                  // 로컬 상태 반영
                   setByDate((prev) => ({
                     ...prev,
                     [selectedDate]: (prev[selectedDate] || []).map((x) =>
@@ -499,7 +500,6 @@ export default function Purpose() { // 이름 변경
                     ),
                   }));
 
-                  // [MOD] 드롭 순간 Firestore 저장 (변경시에만)
                   if (newStartMin !== b.start || newEndMin !== b.end) {
                     const u = auth.currentUser;
                     if (u) {
@@ -524,7 +524,6 @@ export default function Purpose() { // 이름 변경
                 },
               });
 
-              // [MOD] 상단 리사이즈 핸들 (Release 시 서버 저장)
               const handleTopDrag = PanResponder.create({
                 onStartShouldSetPanResponder: () => true,
                 onPanResponderGrant: () => {
@@ -536,7 +535,6 @@ export default function Purpose() { // 이름 변경
                   const deltaMin = snapResize(deltaMinRaw);
                   let newStart = clamp(b.start + deltaMin, 0, b.end - RESIZE_SNAP_MIN);
 
-                  // 로컬
                   setByDate((prev) => ({
                     ...prev,
                     [selectedDate]: (prev[selectedDate] || []).map((x) =>
@@ -544,7 +542,6 @@ export default function Purpose() { // 이름 변경
                     ),
                   }));
 
-                  // 서버
                   if (newStart !== b.start) {
                     const u = auth.currentUser;
                     if (u) {
@@ -558,13 +555,9 @@ export default function Purpose() { // 이름 변경
                   setResizingId(null);
                   setScrollLock(false);
                 },
-                onPanResponderTerminate: () => {
-                  setResizingId(null);
-                  setScrollLock(false);
-                },
+                onPanResponderTerminate: () => { setResizingId(null); setScrollLock(false); },
               });
 
-              // [MOD] 하단 리사이즈 핸들 (Release 시 서버 저장)
               const handleBottomDrag = PanResponder.create({
                 onStartShouldSetPanResponder: () => true,
                 onPanResponderGrant: () => {
@@ -576,7 +569,6 @@ export default function Purpose() { // 이름 변경
                   const deltaMin = snapResize(deltaMinRaw);
                   let newEnd = clamp(b.end + deltaMin, b.start + RESIZE_SNAP_MIN, 1440);
 
-                  // 로컬
                   setByDate((prev) => ({
                     ...prev,
                     [selectedDate]: (prev[selectedDate] || []).map((x) =>
@@ -584,7 +576,6 @@ export default function Purpose() { // 이름 변경
                     ),
                   }));
 
-                  // 서버
                   if (newEnd !== b.end) {
                     const u = auth.currentUser;
                     if (u) {
@@ -598,10 +589,7 @@ export default function Purpose() { // 이름 변경
                   setResizingId(null);
                   setScrollLock(false);
                 },
-                onPanResponderTerminate: () => {
-                  setResizingId(null);
-                  setScrollLock(false);
-                },
+                onPanResponderTerminate: () => { setResizingId(null); setScrollLock(false); },
               });
 
               const isDragging = draggingId === b.id;
@@ -613,34 +601,21 @@ export default function Purpose() { // 이름 변경
                   {...responder.panHandlers}
                   style={[
                     styles.block,
-                    {
-                      ...(layout as any),
-                      backgroundColor: b.color,
-                      transform: [{ translateY }],
-                      zIndex: isDragging ? 2 : 1,
-                    },
+                    { ...(layout as any), backgroundColor: b.color, transform: [{ translateY }], zIndex: isDragging ? 2 : 1 },
                   ]}
                 >
-                  {/* 상단 핸들 */}
+                  {/* 상단/하단 핸들 */}
                   <View pointerEvents="box-only" {...handleTopDrag.panHandlers} style={styles.handleTop}>
                     <View style={{ width: 36, height: 3, borderRadius: 3, backgroundColor: "#E5E7EB", opacity: 0.9 }} />
                   </View>
-
-                  {/* 하단 핸들 */}
                   <View pointerEvents="box-only" {...handleBottomDrag.panHandlers} style={styles.handleBottom}>
                     <View style={{ width: 36, height: 3, borderRadius: 3, backgroundColor: "#E5E7EB", opacity: 0.9 }} />
                   </View>
 
-                  {/* 드래그 중 오버레이 */}
-                  {isDragging && (
-                    <View style={styles.movingOverlay}>
-                      <Text style={styles.movingText}>이동 중</Text>
-                    </View>
-                  )}
-
-                  {/* 기본 카드 내용 */}
-                  {!isDragging && (
-                    <View style={{ flex: 1, overflow: 'hidden', padding: 10 }}>
+                  {isDragging ? (
+                    <View style={styles.movingOverlay}><Text style={styles.movingText}>이동 중</Text></View>
+                  ) : (
+                    <TouchableOpacity style={{ flex: 1, overflow: "hidden", padding: 10 }} activeOpacity={0.8} onPress={() => openEditModal(b)}>
                       <View style={styles.blockTitleRow}>
                         {b.isGoal && <Ionicons name="star" size={12} color="#0B1220" style={styles.blockIcon} />}
                         <Text style={styles.blockTitle} numberOfLines={1}>{b.purpose ?? "할 일"}</Text>
@@ -651,7 +626,7 @@ export default function Purpose() { // 이름 변경
                         </Text>
                       )}
                       <Text style={styles.blockTime}>{toHHMM(b.start)} ~ {toHHMM(b.end)}</Text>
-                    </View>
+                    </TouchableOpacity>
                   )}
                 </Animated.View>
               );
@@ -660,12 +635,11 @@ export default function Purpose() { // 이름 변경
         </View>
       </ScrollView>
 
-      {/* 버튼들을 감싸는 컨테이너 */}
+      {/* 플로팅 버튼 */}
       <View style={styles.fabContainer}>
-         {/* 기존 할 일 추가 버튼 */}
-         <TouchableOpacity style={styles.fab} activeOpacity={0.9} onPress={openAddModal}>
-           <Text style={styles.fabText}>＋</Text>
-         </TouchableOpacity>
+        <TouchableOpacity style={styles.fab} activeOpacity={0.9} onPress={openAddModal}>
+          <Text style={styles.fabText}>＋</Text>
+        </TouchableOpacity>
       </View>
 
       {/* 추가/편집 모달 */}
@@ -677,6 +651,24 @@ export default function Purpose() { // 이름 변경
           onClose={closeModal}
           onSave={handleSave}
           onDelete={handleDelete}
+          // [ADD] 자동 추가 액션 주입
+          onAutoAdd={async (draft) => {
+            // draft는 모달 폼의 현재 값(블록 스냅샷)
+            // 편집모드면 그 블록을 기반으로, 추가모드면 폼의 값으로 생성
+            const base: Block = {
+              id: draft.id || makeId(),
+              start: draft.start,
+              end: draft.end,
+              type: draft.type,
+              action: draft.action,
+              purpose: draft.purpose,
+              isGoal: false,
+              color: draft.color || randomColor(),
+            };
+            await handleAutoAdd(base);
+            // 자동 생성 후 모달 닫기
+            closeModal();
+          }}
         />
       </Modal>
 
@@ -684,40 +676,32 @@ export default function Purpose() { // 이름 변경
   );
 }
 
-//  할 일 추가/편집 모달, 유형/행동은 커스텀 피커로 선택, 시간은 시스템 DateTimePicker 사용
-const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
+//  모달
+const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete, onAutoAdd }: {
   mode: 'add' | 'edit';
   initialData: Block | null;
   onClose: () => void;
   onSave: (block: Block) => void;
   onDelete: (id: string) => void;
+  onAutoAdd: (draft: Block) => Promise<void>; // [ADD]
 }) => {
-  //  폼 상태
   const [purpose, setPurpose] = useState(initialData?.purpose || '');
   const [type, setType] = useState(initialData?.type || '개인');
   const [action, setAction] = useState(initialData?.action || '기타');
   const [isGoal, setIsGoal] = useState(initialData?.isGoal || false);
   const [startTime, setStartTime] = useState(() => toDateFromMinutes(initialData?.start || 540));
   const [endTime, setEndTime] = useState(() => toDateFromMinutes(initialData?.end || 600));
+  const [busy, setBusy] = useState(false);                   // [ADD] 로딩 표시용
 
-  //  커스텀 문자열 피커(유형/행동) 상태
-  const [pickerState, setPickerState] = useState<{
-    visible: boolean;
-    title: string;
-    items: string[];
-    onSelect: (item: string) => void;
-  }>({ visible: false, title: '', items: [], onSelect: () => {} });
+  const [pickerState, setPickerState] = useState<{ visible: boolean; title: string; items: string[]; onSelect: (item: string) => void; }>
+  ({ visible: false, title: '', items: [], onSelect: () => {} });
 
-  //  시간 피커(시작/종료) 토글
   const [timePicker, setTimePicker] = useState<'start' | 'end' | null>(null);
 
-  const handleSave = () => {
+  const handleSavePress = () => {
     onSave({
       id: initialData?.id || makeId(),
-      purpose,
-      type,
-      action,
-      isGoal,
+      purpose, type, action, isGoal,
       start: fromDateToMinutes(startTime),
       end: fromDateToMinutes(endTime),
       color: initialData?.color || randomColor(),
@@ -725,41 +709,46 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
     onClose();
   };
 
-  //  삭제 핸들러
-  const handleDelete = () => {
-    if (initialData?.id) {
-      onDelete(initialData.id);
-    }
+  const handleDeletePress = () => {
+    if (initialData?.id) onDelete(initialData.id);
     onClose();
   };
 
-  //  커스텀 피커 열기
-  const openPicker = (title: string, items: string[], onSelect: (item: string) => void) => {
+  const openPicker = (title: string, items: string[], onSelect: (item: string) => void) =>
     setPickerState({ visible: true, title, items, onSelect });
-  };
 
-  //  시간 변경 콜백
   const onTimeChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
     const currentDate = selectedDate || (timePicker === 'start' ? startTime : endTime);
     setTimePicker(Platform.OS === 'ios' ? timePicker : null);
-    if (timePicker === 'start') {
-      setStartTime(currentDate);
-    } else {
-      setEndTime(currentDate);
-    }
+    if (timePicker === 'start') setStartTime(currentDate);
+    else setEndTime(currentDate);
   };
 
-  // 할 일 자동 추가 버튼 핸들러 (임시)
-  const handleAutoAddPress = () => {
-    console.log("할 일 자동 추가 버튼 클릭");
-    // 여기에 실제 기능 구현
+  // [MOD] 자동 추가 버튼
+  const handleAutoAddPress = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const draft: Block = {
+        id: initialData?.id || makeId(),
+        purpose,
+        type,
+        action,
+        isGoal: false,
+        start: fromDateToMinutes(startTime),
+        end: fromDateToMinutes(endTime),
+        color: initialData?.color || randomColor(),
+      };
+      await onAutoAdd(draft);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <View style={styles.backdrop}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalContainer}>
         <View style={styles.modalCard}>
-          {/* 모달 헤더 */}
           <View style={styles.newModalHeader}>
             <Text style={styles.modalTitle}>{mode === 'add' ? '할 일 추가' : '할 일 편집'}</Text>
             {mode === 'edit' && (
@@ -767,14 +756,13 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
                 <TouchableOpacity onPress={() => setIsGoal(prev => !prev)} style={[styles.goalToggleButton, isGoal && styles.goalToggleButtonActive]}>
                   <Text style={[styles.goalToggleButtonText, isGoal && styles.goalToggleButtonTextActive]}>목표</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
+                <TouchableOpacity onPress={handleDeletePress} style={styles.deleteButton}>
                   <Text style={styles.deleteButtonText}>삭제</Text>
                 </TouchableOpacity>
               </View>
             )}
           </View>
 
-          {/* 할 일 이름 */}
           <Text style={styles.label}>할 일 이름</Text>
           <TextInput
             style={styles.input}
@@ -784,19 +772,16 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
             placeholderTextColor={C.textDim}
           />
 
-          {/* 할일 유형(커스텀 피커) */}
           <Text style={styles.label}>할일 유형</Text>
           <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('할일 유형 선택', TYPES, setType)}>
             <Text style={styles.pickerButtonText}>{type}</Text>
           </TouchableOpacity>
 
-          {/* 행동 유형(커스텀 피커) */}
           <Text style={styles.label}>행동 유형</Text>
           <TouchableOpacity style={styles.pickerButton} onPress={() => openPicker('행동 유형 선택', ACTIONS, setAction)}>
             <Text style={styles.pickerButtonText}>{action}</Text>
           </TouchableOpacity>
 
-          {/* 시간 선택 (시작/종료) */}
           <Text style={styles.label}>시간</Text>
           <View style={styles.timeRow}>
             <TouchableOpacity style={styles.timeBtn} onPress={() => setTimePicker('start')}>
@@ -807,41 +792,28 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
             </TouchableOpacity>
           </View>
 
-          {/* 하단 버튼 */}
           <View style={styles.footerRow}>
-             {/*  할 일 자동 추가 버튼 */}
-             <TouchableOpacity style={[styles.btn, styles.btnAuto]} onPress={handleAutoAddPress}>
-                 <Text style={styles.btnAutoText}>할 일 자동 추가</Text>
-             </TouchableOpacity>
+            {/* 자동 추가 */}
+            <TouchableOpacity style={[styles.btn, styles.btnAuto]} onPress={handleAutoAddPress} disabled={busy}>
+              <Text style={styles.btnAutoText}>{busy ? "생성 중..." : "할 일 자동 추가"}</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={onClose}>
               <Text style={styles.btnGhostText}>취소</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={handleSave}>
+            <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={handleSavePress}>
               <Text style={styles.btnPrimaryText}>{mode === 'add' ? '추가' : '저장'}</Text>
             </TouchableOpacity>
           </View>
         </View>
       </KeyboardAvoidingView>
 
-      {/* 커스텀 문자열 피커 모달 */}
-      <Modal
-        transparent={true}
-        visible={pickerState.visible}
-        animationType="fade"
-        onRequestClose={() => setPickerState({ ...pickerState, visible: false })}
-      >
+      {/* 커스텀 피커 모달 */}
+      <Modal transparent={true} visible={pickerState.visible} animationType="fade" onRequestClose={() => setPickerState({ ...pickerState, visible: false })}>
         <TouchableOpacity style={styles.pickerBackdrop} onPress={() => setPickerState({ ...pickerState, visible: false })}>
           <View style={styles.pickerContainer}>
             <Text style={styles.pickerTitle}>{pickerState.title}</Text>
             {pickerState.items.map(item => (
-              <TouchableOpacity
-                key={item}
-                style={styles.pickerItem}
-                onPress={() => {
-                  pickerState.onSelect(item);
-                  setPickerState({ ...pickerState, visible: false });
-                }}
-              >
+              <TouchableOpacity key={item} style={styles.pickerItem} onPress={() => { pickerState.onSelect(item); setPickerState({ ...pickerState, visible: false }); }}>
                 <Text style={styles.pickerItemText}>{item}</Text>
               </TouchableOpacity>
             ))}
@@ -849,14 +821,8 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete }: {
         </TouchableOpacity>
       </Modal>
 
-      {/* 네이티브 시간 피커 */}
       {timePicker && (
-        <DateTimePicker
-          value={timePicker === 'start' ? startTime : endTime}
-          mode="time"
-          display="spinner"
-          onChange={onTimeChange}
-        />
+        <DateTimePicker value={timePicker === 'start' ? startTime : endTime} mode="time" display="spinner" onChange={onTimeChange} />
       )}
     </View>
   );

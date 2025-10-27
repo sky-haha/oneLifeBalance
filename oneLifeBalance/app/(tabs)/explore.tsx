@@ -109,19 +109,6 @@ type Block = {
 const makeId = () => Math.random().toString(36).slice(2, 9);
 const buildInitialFixedSchedules = () => {
   return {
-    'mon': [
-      { id: makeId(), start: 540, end: 1080, color: "#60A5FA", purpose: "업무", type: "자기개발", action: "노동" },
-      { id: makeId(), start: 1140, end: 1260, color: "#F59E0B", purpose: "점심 시간", type: "식사", action: "기타" },
-    ],
-    'tue': [{ id: makeId(), start: 540, end: 1080, color: "#60A5FA", purpose: "업무", type: "자기개발", action: "노동" }],
-    'wed': [
-      { id: makeId(), start: 540, end: 1080, color: "#60A5FA", purpose: "업무", type: "자기개발", action: "노동" },
-      { id: makeId(), start: 1200, end: 1320, color: "#34D399", purpose: "스터디", type: "자기개발", action: "수업" },
-    ],
-    'thu': [{ id: makeId(), start: 540, end: 1080, color: "#60A5FA", purpose: "업무", type: "자기개발", action: "노동" }],
-    'fri': [{ id: makeId(), start: 540, end: 960, color: "#60A5FA", purpose: "업무", type: "자기개발", action: "노동" }],
-    'sat': [],
-    'sun': [],
   } as Record<string, Block[]>;
 };
 
