@@ -1,0 +1,28 @@
+import React from "react";
+import { View, Text, Button } from "react-native";
+import { db } from "./firebaseConfig";
+import { collection, addDoc } from "firebase/firestore";
+
+export default function App() {
+  // Firestore에 데이터 저장 함수
+  const addData = async () => {
+    try {
+      await addDoc(collection(db, "notes"), {
+        title: "첫 메모",
+        content: "이것은 Firebase Firestore 테스트 데이터입니다.",
+        createdAt: new Date()
+      });
+      console.log("데이터 저장 성공!");
+    } catch (e) {
+      console.error("데이터 저장 실패: ", e);
+    }
+  };
+
+  return (
+    <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <Text>Expo + Firebase Firestore 테스트</Text>
+      <Button title="데이터 추가" onPress={addData} />
+    </View>
+  );
+}
+
