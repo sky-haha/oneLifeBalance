@@ -237,7 +237,7 @@ export default function NewIndex() {
     return () => unsub();
   }, [uid, selectedDate]);
 
-  // [수정] 12:00(정오)를 가로지르는 일정을 AM/PM에 맞게 분리하도록 로직 수정
+  // 12:00(정오)를 가로지르는 일정을 AM/PM에 맞게 분리
   const currentBlocks = useMemo(() => {
     // 원본 데이터 가져오기 (로그인 시 서버, 아니면 빈 배열)
     const baseBlocks = uid ? serverBlocksByDate[selectedDate] || [] : [];
@@ -250,7 +250,7 @@ export default function NewIndex() {
     for (const block of baseBlocks) {
       const { start, end } = block;
 
-      // 1. 블록이 12:00(720분)를 가로지르는 경우 (예: 09:00 ~ 13:00)
+      // 블록이 12:00(720분)를 가로지르는 경우 (예: 09:00 ~ 13:00)
       if (start < HALF_DAY && end > HALF_DAY) {
         if (isAM) {
           // AM 파트: start ~ 12:00
@@ -288,7 +288,7 @@ export default function NewIndex() {
     return transformedBlocks;
 
   }, [uid, serverBlocksByDate, selectedDate, ampmMode]); // ampmMode 의존성 유지
-  // [수정] 로직 종료
+
 
   const processedBlocks = useMemo((): ProcessedBlock[] => {
     if (!uid || !currentBlocks || currentBlocks.length === 0) return [];
