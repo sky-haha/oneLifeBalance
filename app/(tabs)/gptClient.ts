@@ -24,7 +24,7 @@ function toHHMM(min: number) {
 }
 
 export async function suggestAutoTasks(req: AutoTaskRequest): Promise<AutoTaskResponse> {
-   const apiKey = 
+   const apiKey =
   if (!apiKey) throw new Error("OpenAI API Key가 설정되지 않았습니다.");
 
   const spanMin = Math.max(0, req.endMin - req.startMin);
@@ -151,4 +151,93 @@ type="${req.type}", action="${req.action}"의 활동 맥락에 맞는 목적(pur
   }
 
   return { tasks: result };
+}
+
+
+// 피드백 요청 타입
+export type FeedbackRequest = {
+  avgWorkMinutes: number;   // 일 평균 '일 관련' 시간 (분)
+  avgLeisureMinutes: number; // 일 평균 '여가' 시간 (분)
+  totalDays: number;         // 집계 일수
+  modelType: 'korean' | 'nordic'; // 선택한 모델
+};
+
+// 통계 모델 정의
+const MODELS = {
+  korean: {
+    name: "현실 한국인 직장인 모델",
+    workMinutes: 591 + 74, // 근무 9시간 51분 + 통근 1시간 14분 = 665분
+    leisureMinutes: 222,    // 평일 여가 3.7시간
+  },
+  nordic: {
+    name: "북유럽 워라밸 모델",
+    workMinutes: 450,      // 주 37.5시간 (일 7.5시간)
+    leisureMinutes: 348,    // 덴마크/노르웨이 평균 (약 5.8시간)
+  }
+};
+
+/**
+ * 사용자의 시간 사용 데이터를 바탕으로 AI 코치 피드백을 생성합니다.
+ */
+export async function getPersonalizedFeedback(req: FeedbackRequest): Promise<string> {
+  const apiKey = 
+  if (!apiKey) throw new Error("OpenAI API Key가 설정되지 않았습니다.");
+
+  const model = MODELS[req.modelType];
+
+  const system = `
+당신은 사용자의 시간 관리 패턴을 분석하고 조언하는 전문 AI 라이프 코치입니다.
+사용자가 ${req.totalDays}일간의 데이터를 집계했습니다. 이 데이터를 '목표 모델'과 비교하여 피드백을 제공합니다.
+데이터는 일일 평균(분) 기준입니다.
+
+[사용자 데이터]
+- 일 관련 시간 (업무, 학습, 이동 등): ${req.avgWorkMinutes.toFixed(0)}분
+- 여가 시간 (휴식, 운동, 오락 등): ${req.avgLeisureMinutes.toFixed(0)}분
+
+[비교 모델: ${model.name}]
+- 일 관련 시간: ${model.workMinutes}분
+- 여가 시간: ${model.leisureMinutes}분
+
+[요청]
+1. 사용자의 현재 상태를 긍정적으로 진단합니다.
+2. '일 관련 시간'과 '여가 시간'을 비교 모델과 대조하여, 가장 개선이 필요한 지점을 짚어줍니다.
+3. 사용자가 시도해볼 수 있는 구체적인 조언을 1~2문장으로 제안합니다.
+4. 모든 답변은 친근하지만 전문적인 한국어 말투로, 150자 이내의 짧은 텍스트로 요약합니다.
+5. 아래 JSON 포맷으로만 응답하세요.
+
+{
+  "feedback": "여기에 조언 텍스트를 작성하세요."
+}
+`;
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0.6,
+      messages: [
+        { role: "system", content: system },
+      ],
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`OpenAI API 오류: ${res.status} ${errText}`);
+  }
+
+  const data = await res.json();
+  const text: string = data.choices?.[0]?.message?.content || "{}";
+
+  try {
+    const parsed = JSON.parse(text);
+    return parsed.feedback || "피드백을 생성하는 데 실패했습니다. 다시 시도해 주세요.";
+  } catch {
+    return "피드백 응답을 파싱하는 데 실패했습니다.";
+  }
 }
