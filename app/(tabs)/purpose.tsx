@@ -1,26 +1,11 @@
-// Purpose.tsx
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  Animated,
-  Dimensions,
-  KeyboardAvoidingView,
-  Modal,
-  PanResponder,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  LogBox
-} from "react-native";
+import { Animated, Dimensions, KeyboardAvoidingView, LogBox, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// [MOD] Firestore & Auth import
+//파베
 import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
@@ -35,11 +20,10 @@ import {
   setDoc,
   updateDoc
 } from "firebase/firestore";
-import { auth, db } from "./firebaseConfig"; // 경로 확인
+import { auth, db } from "./firebaseConfig";
 
-// [ADD] GPT 유틸
+// gptclient에서 불러옴
 import { suggestAutoTasks } from "./gptClient";
-// [MOD] ───────────────────────────────────────────────────────────────
 LogBox.ignoreLogs([
   "Encountered two children with the same key",
 ]);
@@ -54,10 +38,10 @@ const C = {
   textDim: "#9CA3AF",
   primary: "#3B82F6",
   danger: "#EF4444",
-  secondary: "#10B981", // 자동 생성 버튼 색상
+  secondary: "#10B981", 
 };
 
-// 시간표 UI 배치 관련
+// 시간표 UI 배치
 const HOUR_HEIGHT = 44;
 const HOURS = Array.from({ length: 25 }, (_, i) => i);
 const LABEL_GUTTER = 56;
@@ -116,14 +100,14 @@ type Block = {
   id: string;
   start: number;
   end: number;
-  color: string;     // 서버에는 저장하지 않음(로컬 전용)
+  color: string;
   purpose?: string;
   type?: string;
   action?: string;
   isGoal?: boolean;
 };
 
-//  초기 표시용 데이터(초기 렌더용 목업)
+//  표시용 데이터(테스트용)
 const makeId = () => Math.random().toString(36).slice(2, 9);
 const buildInitial = () => {
   const today = fmt(new Date());
@@ -149,7 +133,7 @@ const buildInitial = () => {
   } as Record<string, Block[]>;
 };
 
-// [MOD] ───────────── Firestore 경로 유틸 & 저장/삭제 로직 ─────────────
+// 파이어베이스, 파이어스토어 저장 삭제관련
 const dateDocRef = (uid: string, dateISO: string) =>
   doc(db, "User", uid, "dateTable", dateISO);
 const timeTableColRef = (uid: string, dateISO: string) =>
@@ -194,35 +178,33 @@ async function deleteTimeBlock(uid: string, dateISO: string, blockId: string) {
   const tref = timeTableDocRef(uid, dateISO, blockId);
   await deleteDoc(tref);
 
-  // 남은 블록 없으면 Use=false
+  // 남은 블록 없으면 false
   const col = timeTableColRef(uid, dateISO);
   const rest = await getDocs(col);
   if (rest.empty) {
     await updateDoc(dateDocRef(uid, dateISO), { Use: false, updatedAt: serverTimestamp() }).catch(() => {});
   }
 }
-// [MOD] ───────────────────────────────────────────────────────────────
 
-// 
 export default function Purpose() {
   const router = useRouter();
   const { date } = useLocalSearchParams<{ date?: string }>();
   const selectedDate = (typeof date === "string" && date) || fmt(new Date());
 
-  // [MOD] 로그인 사용자 uid 상태
+  // 로그인 사용자 uid 상태
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
 
   //  날짜별 블록 상태와 현재 날짜의 블록
   const [byDate, setByDate] = useState<Record<string, Block[]>>(buildInitial());
   const blocks = useMemo(() => byDate[selectedDate] || [], [byDate, selectedDate]);
 
-  // [MOD] 로그인 상태 구독
+  // 로그인상태 확인
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => setUid(u?.uid ?? null));
     return () => unsub();
   }, []);
 
-  // [MOD] 선택 날짜의 timeTable 실시간 구독
+  // 선택 날짜의 timeTable 실시간 확인
   useEffect(() => {
     if (!uid) return;
     const colRef = timeTableColRef(uid, selectedDate);
@@ -252,7 +234,7 @@ export default function Purpose() {
     return () => unsub();
   }, [uid, selectedDate]);
 
-  //  겹치는 블록 레이아웃 계산 (생략: 기존 동일)
+  //  겹치는 블록 레이아웃 계산
   type Layout = { top: number; height: number; left: string; width: string };
   const blockLayouts = useMemo(() => {
     const sortedByTime = [...blocks].sort((a, b) => a.start - b.start);
@@ -364,7 +346,7 @@ export default function Purpose() {
     }
   };
 
-  // [ADD] 자동 추가: GPT → 서브태스크 생성 → Firestore 저장
+  // 일정 자동생성 관련
   const handleAutoAdd = async (base: Block) => {
     try {
       const u = auth.currentUser;
@@ -372,7 +354,7 @@ export default function Purpose() {
       if (!base?.type || !base?.action) throw new Error("type/action이 비어 있어 자동 생성이 불가합니다.");
       if (!(base.end > base.start)) throw new Error("시간 범위가 올바르지 않습니다.");
 
-      // 1) GPT로 서브태스크 얻기
+      // GPT로 서브태스크 얻음
       const suggestion = await suggestAutoTasks({
         dateISO: selectedDate,
         startMin: base.start,
@@ -382,7 +364,7 @@ export default function Purpose() {
         purpose: base.purpose,
       });
 
-      // 2) 시간을 연속적으로 배치
+      // 시간을 연속적으로 배치
       const newBlocks: Block[] = [];
       let cursor = base.start;
       suggestion.tasks.forEach((t) => {
@@ -404,24 +386,23 @@ export default function Purpose() {
 
       if (newBlocks.length === 0) throw new Error("생성된 서브태스크가 없습니다.");
 
-      // 3) Firestore 저장 (병렬)
+      // 서버 저장 
       await Promise.all(newBlocks.map(b => saveTimeBlock(u.uid!, selectedDate, b)));
 
-      // 4) 로컬 상태 즉시 반영
+      // 로컬 상태 반영
       setByDate(prev => {
         const rest = (prev[selectedDate] || []).filter(x => x.id !== base.id);
         return { ...prev, [selectedDate]: [...rest, ...newBlocks] };
       });
 
-      // (선택) 원래 블록은 분해하므로 삭제 처리 원한다면 아래 주석 해제
-      // await deleteTimeBlock(u.uid!, selectedDate, base.id);
+      // await deleteTimeBlock(u.uid!, selectedDate, base.id); (블록그냥삭제하고싶을때)
 
     } catch (e: any) {
       console.warn("[handleAutoAdd] 실패:", e?.message || e);
     }
   };
 
-  // 드래그/리사이즈 관련 (기존 그대로) … ↓↓↓
+  // 드래그/리사이즈 관련
   const [scrollLock, setScrollLock] = useState(false);
   const dragY = useState(new Animated.Value(0))[0];
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -653,14 +634,12 @@ export default function Purpose() {
                 >
                   {/* 상단/하단 핸들 */}
                   <View
-                    //pointerEvents="box-only"
                     {...handleTopDrag.panHandlers}
                     style={[styles.handleTop, { height: handleH, marginTop: -Math.min(10, Math.max(0, handleH - 10)) }]}
                   >
                     <View style={{ width: 36, height: 3, borderRadius: 5, backgroundColor: "#E5E7EB", opacity: 0.9 }} />
                   </View>
                   <View
-                    //pointerEvents="box-only"
                     {...handleBottomDrag.panHandlers}
 
                     style={[styles.handleBottom, { height: handleH, marginBottom: -Math.min(10, Math.max(0, handleH - 10)) }]}
@@ -744,7 +723,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete, onAutoAdd 
   onClose: () => void;
   onSave: (block: Block) => void;
   onDelete: (id: string) => void;
-  onAutoAdd: (draft: Block) => Promise<void>; // [ADD]
+  onAutoAdd: (draft: Block) => Promise<void>; 
 }) => {
   const [purpose, setPurpose] = useState(initialData?.purpose || '');
   const [type, setType] = useState(initialData?.type || '개인');
@@ -752,7 +731,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete, onAutoAdd 
   const [isGoal, setIsGoal] = useState(initialData?.isGoal || false);
   const [startTime, setStartTime] = useState(() => toDateFromMinutes(initialData?.start || 540));
   const [endTime, setEndTime] = useState(() => toDateFromMinutes(initialData?.end || 600));
-  const [busy, setBusy] = useState(false);                   // [ADD] 로딩 표시용
+  const [busy, setBusy] = useState(false);                   // 로딩 표시용
 
   const [pickerState, setPickerState] = useState<{ visible: boolean; title: string; items: string[]; onSelect: (item: string) => void; }>
   ({ visible: false, title: '', items: [], onSelect: () => {} });
@@ -786,7 +765,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete, onAutoAdd 
     else setEndTime(currentDate);
   };
 
-  // [MOD] 자동 추가 버튼
+  // 자동 추가 버튼
   const handleAutoAddPress = async () => {
     if (busy) return;
     setBusy(true);
@@ -797,7 +776,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete, onAutoAdd 
         purpose,
         type,
         action,
-        isGoal: false, // 자동 추가는 목표가 아님
+        isGoal: false, // 자동 추가는 목표x
         start: fromDateToMinutes(startTime),
         end: fromDateToMinutes(endTime),
         color: pickColorForId(newId),
@@ -891,7 +870,7 @@ const NewModalBody = ({ mode, initialData, onClose, onSave, onDelete, onAutoAdd 
   );
 };
 
-//  24h → 12h am/pm 라벨
+//  24시간이 아니라 12시간 am/pm 구분으로
 function formatHour(h: number) {
   const ampm = h < 12 ? "am" : "pm";
   const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
@@ -1097,23 +1076,22 @@ const styles = StyleSheet.create({
   timeBtnText: { color: C.text, fontWeight: "600", fontSize: 16 },
   footerRow: { flexDirection: "row", gap: 12, marginTop: 24 },
   btn: {
-    borderRadius: 12, // flex: 1 제거
+    borderRadius: 12, 
     paddingVertical: 14,
     alignItems: "center",
-    paddingHorizontal: 16, // 좌우 패딩 추가
+    paddingHorizontal: 16, 
   },
-  btnGhost: { backgroundColor: C.border, flex: 1 }, // 취소 버튼은 남은 공간 차지
+  btnGhost: { backgroundColor: C.border, flex: 1 }, 
   btnGhostText: { color: C.text, fontWeight: "700" },
-  btnPrimary: { backgroundColor: C.primary, flex: 1 }, // 저장 버튼도 남은 공간 차지
+  btnPrimary: { backgroundColor: C.primary, flex: 1 }, 
   btnPrimaryText: { color: "#FFF", fontWeight: "bold" },
-  //  자동 추가 버튼 스타일
   btnAuto: {
-      backgroundColor: C.secondary, // 다른 색상 사용
+      backgroundColor: C.secondary, 
   },
   btnAutoText: {
-      color: "#FFF", // 흰색 텍스트
+      color: "#FFF", 
       fontWeight: 'bold',
-      fontSize: 14, // 텍스트 크기 조정 (선택 사항)
+      fontSize: 14, 
   },
 
   pickerBackdrop: {

@@ -1,22 +1,10 @@
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  Alert,
-  Dimensions,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View, LogBox
-} from "react-native";
+import { Alert, Dimensions, KeyboardAvoidingView, LogBox, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-/** 🔹[추가] Firebase 임포트 */
+//파이어베이스 임포트
 import { onAuthStateChanged } from "firebase/auth";
 import {
   addDoc,
@@ -61,24 +49,24 @@ const DAYS = [
   { key: 'sun', label: '일' },
 ];
 
-/** 🔹[추가] Firestore 문서명 매핑 (mon → monday 등) */
+//파이어베이스 문서명
 const DAY_DOC: Record<string, string> = {
   mon: "monday", tue: "tuesday", wed: "wednesday", thu: "thursday",
   fri: "friday", sat: "saturday", sun: "sunday",
 };
 
-// 할일 유형
+// 할일 유형ㄴ
 const TYPES = ['휴식', '가족', '개인', '자기개발', '이동', '식사'];
 // 행동 유형
 const ACTIONS = ['수면', '노동', '수업', '운동', '오락', '기타'];
 
-// 분 단위를 "HH:MM" 형식의 문자열로 변환 (예: 540 -> "09:00")
+// 분 단위를 HH:MM 형식 문자열로 변환
 const toHHMM = (m: number) => {
   const h = Math.floor(m / 60);
   const mm = m % 60;
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 };
-// Date 객체를 자정(00:00) 기준으로 총 몇 분이 지났는지 숫자로 변환
+// Date 객체를 자정 기준으로 총 몇 분이 지났는지 숫자로 변환함
 const fromDateToMinutes = (d: Date) => d.getHours() * 60 + d.getMinutes();
 // 분 단위를 오늘 날짜의 Date 객체로 변환
 const toDateFromMinutes = (minutes: number) => {
@@ -102,11 +90,9 @@ type Block = {
   purpose?: string;   // 할 일 이름
   type?: string;      // 할일 유형
   action?: string;    // 행동 유형
-  /** 🔹[추가] DB 규격 반영 */
   isGoal?: boolean;
 };
 
-// 임시데이터
 // 고유 ID를 생성
 const makeId = () => Math.random().toString(36).slice(2, 9);
 const buildInitialFixedSchedules = () => {
@@ -123,10 +109,10 @@ export default function FixedScheduleScreen() {
   // 모든 요일의 일정 데이터를 관리하는 상태
   const [byDay, setByDay] = useState<Record<string, Block[]>>(buildInitialFixedSchedules());
 
-  /** 🔹[추가] 로그인 사용자 uid */
+  //로그인한 사용자 id
   const [uid, setUid] = useState<string | null>(null);
 
-  /** 🔹[추가] 로그인 상태 구독 */
+  //로그인 상태 확인
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUid(u?.uid ?? null);
@@ -211,7 +197,7 @@ export default function FixedScheduleScreen() {
   // 타임라인의 전체 높이를 계산 (24시간 * 시간당 높이)
   const contentHeight = HOUR_HEIGHT * 24;
 
-  /** 🔹[추가] 선택된 요일의 timeTable 실시간 구독 */
+  //선택된 요일의 timetable 확인
   useEffect(() => {
     if (!uid) return;
     const dayDocName = DAY_DOC[selectedDay];
@@ -243,7 +229,7 @@ export default function FixedScheduleScreen() {
     return unsub;
   }, [uid, selectedDay]);
 
-  /** 🔹[추가] DB 저장/수정/삭제 헬퍼 */
+  // DB 저장/수정/삭제 헬퍼
   const saveBlock = async (mode: 'add' | 'edit', block: Block) => {
     if (!uid) {
       Alert.alert("로그인이 필요합니다", "시간표를 저장하려면 로그인하세요.");
@@ -374,7 +360,6 @@ export default function FixedScheduleScreen() {
           mode={modalMode!}
           initialData={selectedBlock}
           onClose={closeModal}
-          /** 🔹[변경] 저장/삭제 시 Firestore 연동 */
           onSave={(newBlock) => { if (modalMode) saveBlock(modalMode, newBlock); }}
           onDelete={(id) => { deleteBlock(id); }}
         />

@@ -1,22 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  LogBox,
-  Modal,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, LogBox, Modal, SafeAreaView, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
 import Svg, { Path } from 'react-native-svg';
 
-// Firestore imports
+// 파베
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   addDoc,
@@ -29,14 +17,14 @@ import {
   query,
   serverTimestamp,
 } from 'firebase/firestore';
-import { auth, db } from './firebaseConfig'; // ← 경로 확인
+import { auth, db } from './firebaseConfig';
 
-// gptClient에서 새 함수 임포트
+// gptClient에서 가져옴
 import { getPersonalizedFeedback } from './gptClient';
 
 LogBox.ignoreLogs(['Text strings must be rendered within a <Text> component']);
 LogBox.ignoreAllLogs(true);
-// 기존 상수/라벨
+// 할일유형/행동유형 카테고리
 const TYPES = ['휴식', '가족', '개인', '자기개발', '이동', '식사'];
 const ACTIONS = ['수면', '노동', '수업', '운동', '오락', '기타'];
 
@@ -63,7 +51,7 @@ const C = {
 //그래프 영역 크기 상수 값 증가
 const GRAPH_SIZE = 250;
 
-// 공통 색상 팔레트(그래프)
+// 공통 색상 팔레트
 const PIE_COLORS = ['#F97316', '#8B5CF6', '#D97706', '#10B981', '#EF4444', '#FCD34D', '#9CA3AF'];
 
 // 날짜 차이 계산
@@ -75,7 +63,7 @@ const dayDiff = (start?: string, end?: string): number => {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // 시작일 포함
 };
 
-// 날짜 리스트(YYYY-MM-DD) 생성 (양끝 포함)
+// 이어먼스데이 날짜 리스트 생성
 const dateList = (startISO: string, endISO: string): string[] => {
   const out: string[] = [];
   const d = new Date(startISO);
@@ -87,7 +75,7 @@ const dateList = (startISO: string, endISO: string): string[] => {
   return out;
 };
 
-// 분→사람이 읽는 문자열
+// 분을 사람이 읽는 문자열로 변환
 const formatMinutes = (totalMinutes: number): string => {
   if (totalMinutes <= 0) return '0분';
   const hours = Math.floor(totalMinutes / 60);
@@ -98,7 +86,7 @@ const formatMinutes = (totalMinutes: number): string => {
   return result.trim() || '0분';
 };
 
-// 원형 그래프 Path 생성
+// 원형 그래프 생성
 const createPieSlicePath = (cx: number, cy: number, radius: number, startAngle: number, endAngle: number): string => {
   const startRad = (startAngle - 90) * Math.PI / 180;
   const endRad = (endAngle - 90) * Math.PI / 180;
@@ -131,25 +119,25 @@ interface PlaygroundSettings {
   dateRange: { start?: string; end?: string };
 }
 
-// timeTable 데이터 타입(필요 필드만)
+// timeTable 데이터 타입
 type TimeBlock = {
-  startTime: number; // 분
-  endTime: number;   // 분
+  startTime: number;
+  endTime: number;  
   type?: string;
   action?: string;
   isGoal?: boolean;
   fix?: boolean;
 };
 
-//  저장된 graphData 도큐먼트 타입 (aiFeedback 추가)
+//  저장된 graphData 도큐먼트 타입
 type GraphDoc = {
   id: string;
   graphType: 'circularGraph' | 'averageGraph' | 'aiFeedback';
   dateStart: string;
   dateEnd: string;
-  graphCategory: 'type' | 'action' | 'feedback'; // 'feedback' 카테고리 추가
-  graphSubCategory?: string | null; // averageGraph(항목) 또는 aiFeedback(모델명)
-  feedbackText?: string; //  AI 피드백 텍스트
+  graphCategory: 'type' | 'action' | 'feedback';
+  graphSubCategory?: string | null;
+  feedbackText?: string;
 };
 
 // 현재 로그인 UID 얻기 유틸
@@ -162,7 +150,7 @@ const useCurrentUid = () => {
   return uid;
 };
 
-// [기존] 그래프 저장 모달 ( '+' 버튼 클릭 시)
+// 그래프 저장 모달
 const SettingsModal: React.FC<SettingsModalProps> = ({
   isVisible,
   onClose,
@@ -245,7 +233,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           <ScrollView>
             <Text style={styles.modalTitle}>그래프 저장</Text>
 
-            {/* 그래프/평균 토글 (Firestore 저장 종류 선택용) */}
+            {/* 그래프/평균 토글 */}
             <View style={styles.modalSection}>
               <View style={styles.modalToggleRow}>
                 <Text style={styles.modalLabel}>시간 소비 그래프 저장</Text>
@@ -389,13 +377,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   );
 };
 
-// --- [신규 수정] ---
 // AI 피드백 모달
 interface FeedbackModalProps {
   isVisible: boolean;
   onClose: () => void;
-  uid: string; // 데이터 조회를 위해 uid 필요
-  fetchBlocksOfDate: (userId: string, dateISO: string) => Promise<TimeBlock[]>; // 함수 전달
+  uid: string; 
+  fetchBlocksOfDate: (userId: string, dateISO: string) => Promise<TimeBlock[]>; 
 }
 
 const FeedbackModal: React.FC<FeedbackModalProps> = ({
@@ -408,7 +395,7 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
   const [dateRange, setDateRange] = useState<{ start?: string; end?: string }>({});
   const [isCalendarVisible, setIsCalendarVisible] = useState(false);
   const [selectingStartDate, setSelectingStartDate] = useState(true);
-  const [isLoading, setIsLoading] = useState(false); // 로딩 상태
+  const [isLoading, setIsLoading] = useState(false); 
 
   // 모달이 닫힐 때 상태 초기화
   const handleClose = () => {
@@ -435,7 +422,7 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
     }
   };
 
-  // 피드백 생성 핸들러
+  // 피드백 생성
   const handleGenerateFeedback = async () => {
     if (!dateRange.start || !dateRange.end) {
       Alert.alert('날짜 선택 필요', '피드백을 받을 날짜 범위를 선택해주세요.');
@@ -455,16 +442,16 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
       let totalWorkMinutes = 0;
       let totalLeisureMinutes = 0;
 
-      // 논의된 분류 기준에 따라 시간 집계
+      // 분류 기준에 따라 시간 집계
       for (const b of blocks) {
         const duration = Math.max(0, b.endTime - b.startTime);
         
-        // "일 관련 시간" = 노동(A), 수업(A), 자기개발(T), 이동(T)
+        // 일 관련 시간 = 노동(A), 수업(A), 자기개발(T), 이동(T)
         if (b.action === '노동' || b.action === '수업' || b.type === '자기개발' || b.type === '이동') {
           totalWorkMinutes += duration;
         }
         
-        // "여가 시간" = 오락(A), 운동(A), 휴식(T)
+        // 여가 시간 = 오락(A), 운동(A), 휴식(T)
         if (b.action === '오락' || b.action === '운동' || b.type === '휴식') {
           totalLeisureMinutes += duration;
         }
@@ -481,7 +468,7 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
         modelType: modelType,
       });
 
-      //  Firestore에 피드백 결과 저장
+      //  서버에 피드백 결과 저장
       const graphDataCol = collection(doc(collection(db, 'User'), uid), 'graphData');
       await addDoc(graphDataCol, {
         dateStart: dateRange.start!,
@@ -489,8 +476,8 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         graphType: 'aiFeedback',
-        graphCategory: 'feedback', // 'feedback'으로 분류
-        graphSubCategory: modelType, // 'korean' or 'nordic'
+        graphCategory: 'feedback',
+        graphSubCategory: modelType, // 현실적 모델 / 이상적 모델
         feedbackText: feedbackText, // GPT가 생성한 텍스트
       });
 
@@ -536,7 +523,7 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
                   ]}
                   onPress={() => setModelType('korean')}
                 >
-                  <Text style={modelType === 'korean' ? styles.toggleTextActive : styles.toggleTextInactive}>현실 한국인 모델</Text>
+                  <Text style={modelType === 'korean' ? styles.toggleTextActive : styles.toggleTextInactive}>현실 모델</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
@@ -545,7 +532,7 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
                   ]}
                   onPress={() => setModelType('nordic')}
                 >
-                  <Text style={modelType === 'nordic' ? styles.toggleTextActive : styles.toggleTextInactive}>북유럽 워라밸 모델</Text>
+                  <Text style={modelType === 'nordic' ? styles.toggleTextActive : styles.toggleTextInactive}>이상 모델</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -602,7 +589,6 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({
     </Modal>
   );
 };
-// --- [신규 수정 끝] ---
 
 
 // 메인 화면
@@ -622,13 +608,13 @@ export default function PlaygroundScreen() {
   // 현재 사용자 UID
   const uid = useCurrentUid();
 
-  // 저장된 그래프 문서 목록 (실시간)
+  // 저장된 그래프 문서 목록
   const [savedGraphs, setSavedGraphs] = useState<GraphDoc[]>([]);
-  // 저장된 그래프의 렌더 결과(각 도큐먼트별)
+  // 저장된 그래프의 렌더 결과
   const [savedViews, setSavedViews] = useState<React.ReactElement[]>([]);
   const [loadingSaved, setLoadingSaved] = useState(false);
 
-  // 그래프 삭제 핸들러 (기존과 동일)
+  // 그래프 삭제 핸들러
   const handleDeleteGraph = useCallback(async (graphId: string) => {
     if (!uid) return;
     Alert.alert(
@@ -662,7 +648,7 @@ export default function PlaygroundScreen() {
     dateRange: {},
   };
 
-  // Firestore: 특정 날짜의 timeTable 문서들 읽기 (기존과 동일)
+  //특정 날짜의 timeTable 문서들 읽기
   const fetchBlocksOfDate = useCallback(async (userId: string, dateISO: string): Promise<TimeBlock[]> => {
     const ttCol = collection(doc(collection(doc(collection(db, 'User'), userId), 'dateTable'), dateISO), 'timeTable');
     const snap = await getDocs(ttCol);
@@ -683,7 +669,7 @@ export default function PlaygroundScreen() {
     return blocks;
   }, []);
 
-  // 카테고리별 분 합계 (기존과 동일)
+  // 카테고리별 분 합계
   const aggregateByCategory = (blocks: TimeBlock[], category: 'type' | 'action'): Record<string, number> => {
     const acc: Record<string, number> = {};
     for (const b of blocks) {
@@ -696,7 +682,7 @@ export default function PlaygroundScreen() {
     return acc;
   };
 
-  // 설정 저장 시 Firestore에만 기록 (기존과 동일)
+  // 설정 저장 시 서버에 기록
   const handleSaveSettings = async (newSettings: PlaygroundSettings) => {
     setSettings(newSettings);
     try {
@@ -730,7 +716,7 @@ export default function PlaygroundScreen() {
           ...base,
           graphType: 'averageGraph',
           graphCategory: (graphCategory ?? 'type'),
-          graphSubCategory: avgTimeItems[0], // "휴식", "노동" 등
+          graphSubCategory: avgTimeItems[0],
         });
       }
     } catch (e: any) {
@@ -739,12 +725,15 @@ export default function PlaygroundScreen() {
     }
   };
 
-  // 저장된 graphData 실시간 구독 (기존과 동일)
-  useEffect(() => {
-    if (!uid) return;
-    const gCol = collection(doc(collection(db, 'User'), uid), 'graphData');
-    const q = query(gCol, orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
+  useEffect(() => {
+    if (!uid) {
+      setSavedGraphs([]); 
+      return;
+    }
+    setSavedGraphs([]); 
+    const gCol = collection(doc(collection(db, 'User'), uid), 'graphData');
+    const q = query(gCol, orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (snap) => {
       const arr: GraphDoc[] = [];
       snap.forEach((d) => {
         const v = d.data() as any;
@@ -756,7 +745,7 @@ export default function PlaygroundScreen() {
           dateEnd: v.dateEnd,
           graphCategory: v.graphCategory,
           graphSubCategory: v.graphSubCategory ?? null,
-          feedbackText: v.feedbackText ?? null, //  feedbackText 필드 읽기
+          feedbackText: v.feedbackText ?? null,
         });
       });
       setSavedGraphs(arr);
@@ -767,7 +756,7 @@ export default function PlaygroundScreen() {
     return () => unsub();
   }, [uid]);
 
-  //  저장된 graphData → 실제 데이터 읽고 요소 구성 (aiFeedback 렌더링 추가)
+  // 그래프는 실제 데이터를 읽고 요소를 구성
   useEffect(() => {
     const buildSavedViews = async () => {
       if (!uid) return;
@@ -780,7 +769,7 @@ export default function PlaygroundScreen() {
         const views: React.ReactElement[] = [];
 
         for (const g of savedGraphs) {
-          // --- [기존] 원형 그래프 ---
+          // 원형 그래프
           if (g.graphType === 'circularGraph') {
             const validRange = g.dateStart && g.dateEnd && dayDiff(g.dateStart, g.dateEnd) >= 1;
             if (!validRange) continue;
@@ -840,9 +829,8 @@ export default function PlaygroundScreen() {
                 </View>
               );
             } else {
-              // (데이터 없는 카드... 생략)
             }
-          // --- [기존] 평균 시간 ---
+          // 평균 시간
           } else if (g.graphType === 'averageGraph') {
             const validRange = g.dateStart && g.dateEnd && dayDiff(g.dateStart, g.dateEnd) >= 1;
             if (!validRange) continue;
@@ -879,9 +867,9 @@ export default function PlaygroundScreen() {
               </View>
             );
 
-          // ---  AI 피드백 카드 ---
+          // 피드백 카드
           } else if (g.graphType === 'aiFeedback' && g.feedbackText) {
-            const modelName = g.graphSubCategory === 'korean' ? '현실 한국인 모델' : '북유럽 워라밸 모델';
+            const modelName = g.graphSubCategory === 'korean' ? '현실 모델' : '이상 모델';
             views.push(
               <View key={`saved-feedback-${g.id}`} style={styles.card}>
                 {/* 삭제 버튼 */}
@@ -895,7 +883,7 @@ export default function PlaygroundScreen() {
                 {/* 피드백 아이콘 */}
                 <Ionicons name="sparkles" size={24} color={C.primary} style={{ marginBottom: 12 }} />
                 
-                <Text style={styles.feedbackTitle}>AI 라이프 코치 피드백</Text>
+                <Text style={styles.feedbackTitle}>피드백</Text>
                 
                 {/* GPT가 생성한 피드백 텍스트 */}
                 <Text style={styles.feedbackText}>
@@ -922,7 +910,7 @@ export default function PlaygroundScreen() {
     };
 
     buildSavedViews();
-  }, [uid, savedGraphs, fetchBlocksOfDate, handleDeleteGraph]); // 핸들러 의존성 추가
+  }, [uid, savedGraphs, fetchBlocksOfDate, handleDeleteGraph]); // 핸들러 의존성
 
   // 로그인 확인 및 모달 열기
   const openFeedbackModal = () => {
@@ -965,7 +953,7 @@ export default function PlaygroundScreen() {
           <Text style={styles.recommendButtonText}>AI 피드백 받기</Text>
         </TouchableOpacity>
         
-        {/* [기존] '+' 버튼 -> SettingsModal (그래프 저장) 열기 */}
+        {/*그래프 저장*/}
         <TouchableOpacity
           style={styles.addButton}
           onPress={openSettingsModal}
@@ -974,7 +962,7 @@ export default function PlaygroundScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* [기존] 그래프 저장 모달 */}
+      {/* 그래프 저장 모달 */}
       <SettingsModal
         isVisible={isSettingsModalVisible}
         onClose={() => setIsSettingsModalVisible(false)}
@@ -998,7 +986,7 @@ export default function PlaygroundScreen() {
   );
 }
 
-// 스타일 정의(기존 + 삭제 버튼 스타일 유지)
+// 스타일
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -1278,6 +1266,6 @@ const styles = StyleSheet.create({
     color: C.text,
     textAlign: 'center',
     lineHeight: 22,
-    paddingHorizontal: 10, // 텍스트가 너무 길어지지 않게 좌우 패딩
+    paddingHorizontal: 10, 
   },
 });

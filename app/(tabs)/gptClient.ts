@@ -1,4 +1,3 @@
-// gptClient.ts
 export type AutoTaskRequest = {
   dateISO: string;
   startMin: number;
@@ -154,31 +153,28 @@ type="${req.type}", action="${req.action}"의 활동 맥락에 맞는 목적(pur
 }
 
 
-// 피드백 요청 타입
+// 피드백 요청
 export type FeedbackRequest = {
-  avgWorkMinutes: number;   // 일 평균 '일 관련' 시간 (분)
-  avgLeisureMinutes: number; // 일 평균 '여가' 시간 (분)
-  totalDays: number;         // 집계 일수
+  avgWorkMinutes: number;   // 일 평균 일 관련 시간
+  avgLeisureMinutes: number; // 일 평균 여가 시간
+  totalDays: number;         // 집계 일수(는 사용자가 선택)
   modelType: 'korean' | 'nordic'; // 선택한 모델
 };
 
-// 통계 모델 정의
 const MODELS = {
   korean: {
     name: "현실 한국인 직장인 모델",
-    workMinutes: 591 + 74, // 근무 9시간 51분 + 통근 1시간 14분 = 665분
-    leisureMinutes: 222,    // 평일 여가 3.7시간
+    workMinutes: 591 + 74, 
+    leisureMinutes: 222,    
   },
   nordic: {
     name: "북유럽 워라밸 모델",
-    workMinutes: 450,      // 주 37.5시간 (일 7.5시간)
-    leisureMinutes: 348,    // 덴마크/노르웨이 평균 (약 5.8시간)
+    workMinutes: 450,      
+    leisureMinutes: 348,   
   }
 };
 
-/**
- * 사용자의 시간 사용 데이터를 바탕으로 AI 코치 피드백을 생성합니다.
- */
+
 export async function getPersonalizedFeedback(req: FeedbackRequest): Promise<string> {
   const apiKey = 
   if (!apiKey) throw new Error("OpenAI API Key가 설정되지 않았습니다.");

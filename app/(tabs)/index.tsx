@@ -5,7 +5,7 @@ import { Dimensions, LogBox, Modal, PanResponder, ScrollView, StyleSheet, Text, 
 import { Calendar } from "react-native-calendars";
 import { Circle, G, Path, Rect, Svg, Text as SvgText } from "react-native-svg";
 
-// 🔐 Firebase (경로는 프로젝트에 맞게 변경)
+//파베
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { auth, db } from "./firebaseConfig";
@@ -15,7 +15,7 @@ LogBox.ignoreAllLogs(true);
 // 기기의 화면 너비를 가져옴
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// Date 객체를 'YYYY-MM-DD' 형식의 문자열로 변환
+// Date 객체를 이어먼스데이 형식의 문자열로 변환
 const fmt = (d: Date) => d.toISOString().split("T")[0];
 // 주어진 ISO 형식의 날짜 문자열에 특정 일(delta)을 더하거나 뺌
 const addDays = (iso: string, delta: number) => {
@@ -23,7 +23,7 @@ const addDays = (iso: string, delta: number) => {
   d.setDate(d.getDate() + delta);
   return fmt(d);
 };
-// ISO 형식의 날짜 문자열을 'YYYY.MM.DD (요일)' 형식으로 변환
+// ISO 형식의 날짜 문자열을 이어먼스데이 형식으로 변환
 const toKoreanLabel = (iso: string) => {
   const d = new Date(iso);
   const dow = ["일", "월", "화", "수", "목", "금", "토"][d.getDay()];
@@ -38,7 +38,7 @@ const toHHMM = (m: number) => {
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 };
 
-// 극좌표(반지름, 각도)를 직교좌표(x, y)로 변환
+// 반지름,각도를 x,y로 변환
 function polarToCartesian(centerX: number, centerY: number, radius: number, angleInDegrees: number): { x: number; y: number } {
   const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180.0; // 12시 기준 보정
   return {
@@ -47,12 +47,12 @@ function polarToCartesian(centerX: number, centerY: number, radius: number, angl
   };
 }
 
-// 시계 숫자(1~12) 각도 계산 헬퍼
+// 시계 숫자(1~12) 각도 계산
 const hourToAngle = (h: number) => ((h % 12) / 12) * 360;
 
-// 시계 숫자 라벨 렌더러
+// 시계 숫자 라벨 렌더
 const HourLabels = ({ radius = 46.5 }: { radius?: number }) => {
-  const hours = Array.from({ length: 12 }, (_, i) => (i + 1)); // 1..12
+  const hours = Array.from({ length: 12 }, (_, i) => (i + 1)); // 1부터12
   return (
     <>
       {hours.map((h) => {
@@ -77,7 +77,7 @@ const HourLabels = ({ radius = 46.5 }: { radius?: number }) => {
   );
 };
 
-// 도넛 차트 조각의 SVG 경로(path) 데이터를 생성하는 함수 (sweepFlag 수정본)
+// 도넛 차트 조각의 SVG 경로 데이터를 생성하는 함수
 function createDonutSlicePath(
   cx: number, cy: number,
   innerRadius: number, outerRadius: number,
@@ -112,17 +112,17 @@ function createDonutSlicePath(
   return d;
 }
 
-// 일정 블록의 데이터 구조
+// 일정 블록 데이터구조
 type Block = {
   id: string;
-  start: number;     // 분 (0~1439)
-  end: number;       // 분 (0~1440)
+  start: number;     // 시작 분
+  end: number;       // 끝 분
   color: string;
   label?: string;    // purpose 매핑
   isGoal?: boolean;  // 목표 여부
 };
 
-// SVG 렌더링을 위해 가공된 블록
+// SVG 렌더링을
 type ProcessedBlock = {
   block: Block;
   innerRadius: number;
@@ -133,8 +133,8 @@ type ProcessedBlock = {
 // 클릭된 정보 타입
 type ActiveLegend = {
     block: Block;
-    x: number; // SVG 내부 좌표 X
-    y: number; // SVG 내부 좌표 Y
+    x: number;
+    y: number; 
 };
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
@@ -187,7 +187,7 @@ const DonutSlice = ({ block, innerRadius, outerRadius, onPress }: {
 };
 
 
-// --- 메인 컴포넌트 ---
+// 메인 컴포넌트
 export default function NewIndex() {
   const router = useRouter();
   const today = fmt(new Date());
@@ -237,31 +237,29 @@ export default function NewIndex() {
     return () => unsub();
   }, [uid, selectedDate]);
 
-  // 12:00(정오)를 가로지르는 일정을 AM/PM에 맞게 분리
+  // 정오를 가로지르는 일정을 AM/PM에 맞게 분리
   const currentBlocks = useMemo(() => {
-    // 원본 데이터 가져오기 (로그인 시 서버, 아니면 빈 배열)
+    // 원본 데이터 가져오
     const baseBlocks = uid ? serverBlocksByDate[selectedDate] || [] : [];
     const HALF_DAY = 720; // 12:00 (720분)
     const isAM = ampmMode === 'AM';
 
-    // 변환된 블록(잘린 블록 포함)을 담을 새 배열
+    // 변환된 블록을 담을 새 배열
     const transformedBlocks: Block[] = [];
 
     for (const block of baseBlocks) {
       const { start, end } = block;
 
-      // 블록이 12:00(720분)를 가로지르는 경우 (예: 09:00 ~ 13:00)
+      // 블록이 12:00(720분)를 가로지르는 경우, 즉 오전-오후 넘어갈경우
       if (start < HALF_DAY && end > HALF_DAY) {
         if (isAM) {
-          // AM 파트: start ~ 12:00
           transformedBlocks.push({
             ...block,
-            id: block.id + '_am_part', // React key를 위한 고유 ID
+            id: block.id + '_am_part',
             start: start,
             end: HALF_DAY, // AM 탭에서는 12:00에 끝나는 것으로 자름
           });
         } else {
-          // PM 파트: 12:00 ~ end
           transformedBlocks.push({
             ...block,
             id: block.id + '_pm_part', // React key를 위한 고유 ID
@@ -270,13 +268,13 @@ export default function NewIndex() {
           });
         }
       }
-      // 2. 블록이 완전히 AM(12:00 이전)에 끝나는 경우
+      // 블록이 완전히 AM에 끝나는 경우
       else if (end <= HALF_DAY) {
         if (isAM) {
           transformedBlocks.push(block); // AM 탭에만 표시
         }
       }
-      // 3. 블록이 완전히 PM(12:00 이후)에 시작하는 경우
+      // 블록이 완전히 PM에 시작하는 경우
       else if (start >= HALF_DAY) {
         if (!isAM) {
           transformedBlocks.push(block); // PM 탭에만 표시
@@ -387,9 +385,7 @@ export default function NewIndex() {
           setActiveLegend(null);
           return;
       }
-      
-      // event.nativeEvent.locationX, event.nativeEvent.locationY는 뷰포트 내의 클릭 좌표
-      // SVG viewBox(0-100) 기준으로 변환해야 함
+
       const svgScale = 100 / (SCREEN_WIDTH * 0.64);
       const clickedX = event.nativeEvent.locationX * svgScale;
       const clickedY = event.nativeEvent.locationY * svgScale;
@@ -452,7 +448,7 @@ export default function NewIndex() {
               />
             ))}
 
-            {/* 중앙 영역(원 + 텍스트)을 <G>로 묶고 여기에 onPress 할당 */}
+            {/* 중앙 영역을 <G>로 묶고 여기에 onPress 할당 */}
             <G onPress={() => { setActiveLegend(null); openPurpose(); }}>
               {/* 중앙 원 (로그인 시 투명) */}
               <Circle cx="50" cy="50" r="10" fill={uid ? "transparent" : "#f9fafb"} />
@@ -471,7 +467,7 @@ export default function NewIndex() {
 
             {/* 할일 이름 클릭시 렌더링*/}
             {activeLegend && activeLegend.block && (() => {
-                // --- 텍스트와 원을 포함하는 동적 너비 계산 ---
+                // 텍스트/원 포함, 동적 너비 계산
                 const label = activeLegend.block.label;
                 const fontSize = 6;
                 const circleRadius = 3; 
@@ -479,8 +475,8 @@ export default function NewIndex() {
                 const spacing = 2; 
 
                 // 좌우 여백 분리
-                const paddingLeft = 5; // (왼쪽 여백 조절)
-                const paddingRight = 8; // (오른쪽 여백 조절)
+                const paddingLeft = 5;
+                const paddingRight = 8; 
                 
                 // 상하 여백 조절
                 const verticalPadding = 3;   
@@ -493,27 +489,26 @@ export default function NewIndex() {
                 const boxWidth = paddingLeft + contentWidth + paddingRight;
                 const boxHeight = fontSize + verticalPadding * 2;
                 
-                // [수정] 1. 이상적인 위치 계산 (클릭 지점 중심)
+                //  이상적인 위치 계산
                 const idealBoxX = activeLegend.x - boxWidth / 2;
                 const idealBoxY = activeLegend.y - boxHeight / 2;
 
-                // [수정] 2. SVG 경계(0, 0, 100, 100) 내로 위치 보정
-                const STROKE_BUFFER = 0.5; // 테두리가 잘리지 않도록 약간의 여백
+                //  SVG 경계 내로 위치 보정
+                const STROKE_BUFFER = 0.5;
                 const finalBoxX = Math.max(STROKE_BUFFER, Math.min(idealBoxX, 100 - boxWidth - STROKE_BUFFER));
                 const finalBoxY = Math.max(STROKE_BUFFER, Math.min(idealBoxY, 100 - boxHeight - STROKE_BUFFER));
                 
-                // [수정] 3. 내부 요소들의 위치를 *보정된* finalBoxX/Y 기준으로 다시 계산
-                const elementCenterY = finalBoxY + (boxHeight / 2); // 상자의 세로 중앙
+                // 내부 요소들의 위치를 좀더 보정해서 다시계싼
+                const elementCenterY = finalBoxY + (boxHeight / 2);
                 const circleX = finalBoxX + paddingLeft + circleRadius;
                 const textX = circleX + circleRadius + spacing;
-                // --- 계산 끝 ---
 
                 return (
-                    // G(그룹)로 묶어서 렌더링 (클릭 이벤트 전파 방지)
+                    // G로 묶어서 렌더링
                     <G onPressIn={() => { /* 버블링 방지 */ }}> 
                         <Rect
-                            x={finalBoxX} // [수정] 보정된 값 사용
-                            y={finalBoxY} // [수정] 보정된 값 사용
+                            x={finalBoxX}
+                            y={finalBoxY}
                             width={boxWidth}
                             height={boxHeight}
                             fill="rgba(255,255,255,0.95)"
@@ -523,14 +518,14 @@ export default function NewIndex() {
                             strokeWidth="0.3"
                         />
                         <Circle
-                            cx={circleX} // [수정] 보정된 값 기준
-                            cy={elementCenterY} // [수정] 보정된 값 기준
+                            cx={circleX}
+                            cy={elementCenterY}
                             r={circleRadius}
                             fill={activeLegend.block.color}
                         />
                         <SvgText
-                            x={textX} // [수정] 보정된 값 기준
-                            y={elementCenterY} // [수정] 보정된 값 기준
+                            x={textX} 
+                            y={elementCenterY}
                             textAnchor="start"
                             alignmentBaseline="middle"
                             fontSize={fontSize}
@@ -605,7 +600,7 @@ export default function NewIndex() {
          <View style={styles.modalBackdrop}>
            <TouchableOpacity style={styles.modalBackdropTap} activeOpacity={1} onPress={() => setCalendarOpen(false)} />
            <View style={styles.modalBody}>
-             <Calendar /* ... Calendar props ... */ />
+             <Calendar/>
            </View>
          </View>
       </Modal>
@@ -687,7 +682,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
   },
   
-  // (기존 todoItem 스타일)
   todoItem: {
     flexDirection: 'row',
     alignItems: 'center',

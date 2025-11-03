@@ -1,7 +1,7 @@
 // syncRoutineToDates.ts
 import {
-    collection, doc, getDoc, getDocs, onSnapshot,
-    writeBatch
+  collection, doc, getDoc, getDocs, onSnapshot,
+  writeBatch
 } from "firebase/firestore";
 import { db } from "./firebaseConfig";
 

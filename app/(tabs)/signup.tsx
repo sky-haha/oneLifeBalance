@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Platform, LogBox } from "react-native";
-import { createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { auth } from "./firebaseConfig.js"; 
 import { router } from "expo-router";
+import { createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import React, { useMemo, useState } from "react";
+import { ActivityIndicator, Alert, LogBox, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { auth } from "./firebaseConfig.js";
 LogBox.ignoreLogs(['Text strings must be rendered within a <Text> component']);
 LogBox.ignoreAllLogs(true);
 //기본 컴포넌트, 이메일/비밀번호를 입력값으로 받음

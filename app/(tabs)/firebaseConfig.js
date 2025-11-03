@@ -20,6 +20,5 @@ const app = initializeApp(firebaseConfig);
 
 const analytics = getAnalytics(app);
 
-// 서비스 가져오기 (로그인, DB 등)
-export const auth = getAuth(app);        // Firebase 인증
-export const db = getFirestore(app);     // Cloud Firestore.
+export const auth = getAuth(app);        
+export const db = getFirestore(app); 
