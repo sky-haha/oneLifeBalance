@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Dimensions, Modal, PanResponder, ScrollView, StyleSheet, Text, TouchableOpacity, View, LogBox } from "react-native";
+import { Dimensions, LogBox, Modal, PanResponder, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { Circle, G, Path, Rect, Svg, Text as SvgText } from "react-native-svg";
 
