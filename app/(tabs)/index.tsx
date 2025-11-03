@@ -491,15 +491,20 @@ export default function NewIndex() {
                 const contentWidth = circleDiameter + spacing + estimatedTextWidth;
                 
                 const boxWidth = paddingLeft + contentWidth + paddingRight;
-
                 const boxHeight = fontSize + verticalPadding * 2;
-                const boxX = activeLegend.x - boxWidth / 2;
-                const boxY = activeLegend.y - boxHeight / 2;
                 
-                const elementCenterY = activeLegend.y;
-              
-                const circleX = boxX + paddingLeft + circleRadius;
+                // [수정] 1. 이상적인 위치 계산 (클릭 지점 중심)
+                const idealBoxX = activeLegend.x - boxWidth / 2;
+                const idealBoxY = activeLegend.y - boxHeight / 2;
+
+                // [수정] 2. SVG 경계(0, 0, 100, 100) 내로 위치 보정
+                const STROKE_BUFFER = 0.5; // 테두리가 잘리지 않도록 약간의 여백
+                const finalBoxX = Math.max(STROKE_BUFFER, Math.min(idealBoxX, 100 - boxWidth - STROKE_BUFFER));
+                const finalBoxY = Math.max(STROKE_BUFFER, Math.min(idealBoxY, 100 - boxHeight - STROKE_BUFFER));
                 
+                // [수정] 3. 내부 요소들의 위치를 *보정된* finalBoxX/Y 기준으로 다시 계산
+                const elementCenterY = finalBoxY + (boxHeight / 2); // 상자의 세로 중앙
+                const circleX = finalBoxX + paddingLeft + circleRadius;
                 const textX = circleX + circleRadius + spacing;
                 // --- 계산 끝 ---
 
@@ -507,8 +512,8 @@ export default function NewIndex() {
                     // G(그룹)로 묶어서 렌더링 (클릭 이벤트 전파 방지)
                     <G onPressIn={() => { /* 버블링 방지 */ }}> 
                         <Rect
-                            x={boxX}
-                            y={boxY}
+                            x={finalBoxX} // [수정] 보정된 값 사용
+                            y={finalBoxY} // [수정] 보정된 값 사용
                             width={boxWidth}
                             height={boxHeight}
                             fill="rgba(255,255,255,0.95)"
@@ -518,14 +523,14 @@ export default function NewIndex() {
                             strokeWidth="0.3"
                         />
                         <Circle
-                            cx={circleX}
-                            cy={elementCenterY}
+                            cx={circleX} // [수정] 보정된 값 기준
+                            cy={elementCenterY} // [수정] 보정된 값 기준
                             r={circleRadius}
                             fill={activeLegend.block.color}
                         />
                         <SvgText
-                            x={textX}
-                            y={elementCenterY}
+                            x={textX} // [수정] 보정된 값 기준
+                            y={elementCenterY} // [수정] 보정된 값 기준
                             textAnchor="start"
                             alignmentBaseline="middle"
                             fontSize={fontSize}
