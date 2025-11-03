@@ -237,15 +237,58 @@ export default function NewIndex() {
     return () => unsub();
   }, [uid, selectedDate]);
 
+  // 12:00(정오)를 가로지르는 일정을 AM/PM에 맞게 분리
   const currentBlocks = useMemo(() => {
+    // 원본 데이터 가져오기 (로그인 시 서버, 아니면 빈 배열)
     const baseBlocks = uid ? serverBlocksByDate[selectedDate] || [] : [];
-    const HALF_DAY = 720;
-    if (ampmMode === 'AM') {
-      return baseBlocks.filter(b => b.start < HALF_DAY);
-    } else {
-      return baseBlocks.filter(b => b.start >= HALF_DAY);
+    const HALF_DAY = 720; // 12:00 (720분)
+    const isAM = ampmMode === 'AM';
+
+    // 변환된 블록(잘린 블록 포함)을 담을 새 배열
+    const transformedBlocks: Block[] = [];
+
+    for (const block of baseBlocks) {
+      const { start, end } = block;
+
+      // 블록이 12:00(720분)를 가로지르는 경우 (예: 09:00 ~ 13:00)
+      if (start < HALF_DAY && end > HALF_DAY) {
+        if (isAM) {
+          // AM 파트: start ~ 12:00
+          transformedBlocks.push({
+            ...block,
+            id: block.id + '_am_part', // React key를 위한 고유 ID
+            start: start,
+            end: HALF_DAY, // AM 탭에서는 12:00에 끝나는 것으로 자름
+          });
+        } else {
+          // PM 파트: 12:00 ~ end
+          transformedBlocks.push({
+            ...block,
+            id: block.id + '_pm_part', // React key를 위한 고유 ID
+            start: HALF_DAY, // PM 탭에서는 12:00에 시작하는 것으로 자름
+            end: end,
+          });
+        }
+      }
+      // 2. 블록이 완전히 AM(12:00 이전)에 끝나는 경우
+      else if (end <= HALF_DAY) {
+        if (isAM) {
+          transformedBlocks.push(block); // AM 탭에만 표시
+        }
+      }
+      // 3. 블록이 완전히 PM(12:00 이후)에 시작하는 경우
+      else if (start >= HALF_DAY) {
+        if (!isAM) {
+          transformedBlocks.push(block); // PM 탭에만 표시
+        }
+      }
     }
-  }, [uid, serverBlocksByDate, selectedDate, ampmMode]);
+    
+    // 이렇게 변환된 블록 리스트를 반환
+    return transformedBlocks;
+
+  }, [uid, serverBlocksByDate, selectedDate, ampmMode]); // ampmMode 의존성 유지
+
 
   const processedBlocks = useMemo((): ProcessedBlock[] => {
     if (!uid || !currentBlocks || currentBlocks.length === 0) return [];
