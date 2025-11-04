@@ -47,7 +47,8 @@ const HOURS = Array.from({ length: 25 }, (_, i) => i);
 const LABEL_GUTTER = 56;
 const SNAP_MIN = 30;
 const FLICK_PROJECT_PX = 160;
-const DRAG_THRESHOLD_PX = 4;
+const DRAG_THRESHOLD_PX = 10; //추가, 원래 4
+const CLICK_THRESHOLD_PX = 5; //추가, 원래 없었음
 const MIN_PROJECT_VY = 0.35;
 const HANDLE_ZONE_PX = 28;
 const RESIZE_SNAP_MIN = 15;
@@ -417,8 +418,9 @@ export default function Purpose() {
   const [resizingId, setResizingId] = useState<null | { id: string; edge: "top" | "bottom"; origStart: number; origEnd: number; }>(null);
 
   const getHandleZone = (hPx: number) => {
-    
-    return Math.max(40, Math.min(HANDLE_ZONE_PX, Math.floor(hPx * 0.5)));
+
+  const handlePercentHeight = Math.floor(hPx * 0.3); 
+  return Math.min(handlePercentHeight, HANDLE_ZONE_PX);
   };
 
   const inTopHandleZone = (y: number, hPx: number) => y <= getHandleZone(hPx);

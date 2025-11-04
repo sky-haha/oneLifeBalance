@@ -595,15 +595,29 @@ export default function NewIndex() {
         })()}
       </ScrollView>
 
-      {/* 달력 모달 */}
-      <Modal visible={calendarOpen} transparent animationType="fade" onRequestClose={() => setCalendarOpen(false)}>
-         <View style={styles.modalBackdrop}>
-           <TouchableOpacity style={styles.modalBackdropTap} activeOpacity={1} onPress={() => setCalendarOpen(false)} />
-           <View style={styles.modalBody}>
-             <Calendar/>
-           </View>
-         </View>
-      </Modal>
+   {/* 달력 모달 */}
+    <Modal visible={calendarOpen} transparent animationType="fade" onRequestClose={() => setCalendarOpen(false)}>
+    <View style={styles.modalBackdrop}>
+    <TouchableOpacity style={styles.modalBackdropTap} activeOpacity={1} onPress={() => setCalendarOpen(false)} />
+    <View style={styles.modalBody}>
+      <Calendar
+        current={selectedDate} 
+        onDayPress={(day) => {
+          setSelectedDate(day.dateString); 
+          setCalendarOpen(false);       
+        }}
+        markedDates={{
+          [selectedDate]: { selected: true, selectedColor: '#3B82F6' }
+        }}
+        theme={{
+          todayTextColor: '#3B82F6',
+          arrowColor: '#3B82F6',
+          selectedDayBackgroundColor: '#3B82F6',
+        }}
+      />
+      </View>
+     </View>
+    </Modal>
     </View>
   );
 }
