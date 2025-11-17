@@ -90,11 +90,7 @@ export default function LoginScreen() { //이메일, 비밀번호, 비밀번호 
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.linkBtn} disabled>
-            <Text style={[styles.linkText, styles.disabledText]}>
-              비밀번호를 잊으셨나요? (준비중)
-            </Text>
-          </TouchableOpacity>
+
         </View>
       </ScrollView>
   );

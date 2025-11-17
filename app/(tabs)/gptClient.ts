@@ -23,7 +23,8 @@ function toHHMM(min: number) {
 }
 
 export async function suggestAutoTasks(req: AutoTaskRequest): Promise<AutoTaskResponse> {
-   const apiKey = 
+   const apiKey =  
+
   if (!apiKey) throw new Error("OpenAI API Key가 설정되지 않았습니다.");
 
   const spanMin = Math.max(0, req.endMin - req.startMin);
@@ -157,7 +158,7 @@ type="${req.type}", action="${req.action}"의 활동 맥락에 맞는 목적(pur
 export type FeedbackRequest = {
   avgWorkMinutes: number;   // 일 평균 일 관련 시간
   avgLeisureMinutes: number; // 일 평균 여가 시간
-  totalDays: number;         // 집계 일수(는 사용자가 선택)
+  totalDays: number;         // 집계 일수
   modelType: 'korean' | 'nordic'; // 선택한 모델
 };
 

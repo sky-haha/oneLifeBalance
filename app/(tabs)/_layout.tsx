@@ -1,5 +1,5 @@
-import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { Tabs } from "expo-router";
 
 export default function TabLayout() {
   return (
@@ -26,7 +26,8 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="explore"
-        options={{
+        options={{ 
+          href: null,
           title: "고정 할 일",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="paper-plane" size={size} color={color} />
